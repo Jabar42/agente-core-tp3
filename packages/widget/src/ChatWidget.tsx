@@ -64,56 +64,23 @@ export default function ChatWidget({
   const wsRef = useRef<WebSocket | null>(null);
   const messagesEnd = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
-  const chatWindowRef = useRef<HTMLDivElement>(null);
   const typewriterQueue = useRef<string[]>([]);
   const typewriterTimer = useRef<ReturnType<typeof setInterval> | null>(null);
 
-  // Lock body scroll when chat is open. Uses two mechanisms:
-  // 1. position:fixed on body (mobile keyboard safe)
-  // 2. wheel/touch listeners on the chat window to prevent event leakage
+  // Lock scroll on the page behind the chat.
+  // Using overflow:hidden on <html> is the standard approach used by
+  // modal/chat libraries — it blocks wheel and touch scroll on desktop
+  // and mobile without interfering with the keyboard or viewport.
   useEffect(() => {
     if (open && !closing) {
-      const scrollY = window.scrollY;
-      document.body.style.position = "fixed";
-      document.body.style.top = `-${scrollY}px`;
-      document.body.style.width = "100%";
-    } else if (!open) {
-      const top = Math.abs(parseInt(document.body.style.top || "0", 10));
-      document.body.style.position = "";
-      document.body.style.top = "";
-      document.body.style.width = "";
-      window.scrollTo(0, top);
+      document.documentElement.style.overflow = "hidden";
+    } else {
+      document.documentElement.style.overflow = "";
     }
     return () => {
-      const top = Math.abs(parseInt(document.body.style.top || "0", 10));
-      document.body.style.position = "";
-      document.body.style.top = "";
-      document.body.style.width = "";
-      if (open) window.scrollTo(0, top);
+      document.documentElement.style.overflow = "";
     };
   }, [open, closing]);
-
-  // Prevent events on the chat window from scrolling the page behind.
-  // Only blocks events targeting the window itself, not the scrollable messages area.
-  useEffect(() => {
-    const el = chatWindowRef.current;
-    if (!el || !open) return;
-
-    function blockIfOutsideMessages(e: WheelEvent | TouchEvent) {
-      const target = e.target as HTMLElement;
-      // Allow scroll inside the messages container
-      if (target.closest('[data-chat-messages]')) return;
-      e.preventDefault();
-    }
-
-    el.addEventListener("wheel", blockIfOutsideMessages, { passive: false });
-    el.addEventListener("touchmove", blockIfOutsideMessages, { passive: false });
-
-    return () => {
-      el.removeEventListener("wheel", blockIfOutsideMessages);
-      el.removeEventListener("touchmove", blockIfOutsideMessages);
-    };
-  }, [open]);
 
   useEffect(() => {
     // Don't scroll on first render — wait for the open animation
@@ -330,7 +297,6 @@ export default function ChatWidget({
 
       {open && (
         <div
-          ref={chatWindowRef}
           className={closing ? "chat-window-out" : "chat-window"}
           style={{
             position: "fixed",
@@ -341,7 +307,6 @@ export default function ChatWidget({
             maxWidth: "calc(100vw - 48px)",
             height: chatHeight,
             maxHeight: "calc(100dvh - 48px)",
-            overscrollBehavior: "contain",
             background: "var(--chat-primary-fg, #fff)",
             display: "flex",
             flexDirection: "column",
@@ -401,7 +366,6 @@ export default function ChatWidget({
 
           {/* Messages */}
           <div
-            data-chat-messages
             style={{
               flex: 1,
               overflowY: "auto",

@@ -1,6 +1,6 @@
 {
   "name": "@tp3/chat-widget",
-  "version": "0.1.10",
+  "version": "0.1.11",
   "main": "dist/ChatWidget.js",
   "module": "dist/ChatWidget.mjs",
   "types": "dist/ChatWidget.d.ts",
