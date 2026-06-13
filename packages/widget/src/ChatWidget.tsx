@@ -67,34 +67,6 @@ export default function ChatWidget({
   const typewriterQueue = useRef<string[]>([]);
   const typewriterTimer = useRef<ReturnType<typeof setInterval> | null>(null);
 
-  // Lock scroll on the page behind the chat without blocking scroll
-  // inside the chat messages area. Uses position:fixed on body — the
-  // chat window is also fixed, so it stays visible and its internal
-  // overflow-y:auto container scrolls independently.
-  const savedScrollY = useRef(0);
-
-  useEffect(() => {
-    if (open && !closing) {
-      savedScrollY.current = window.scrollY;
-      document.body.style.position = "fixed";
-      document.body.style.top = `-${savedScrollY.current}px`;
-      document.body.style.left = "0";
-      document.body.style.right = "0";
-    } else {
-      document.body.style.position = "";
-      document.body.style.top = "";
-      document.body.style.left = "";
-      document.body.style.right = "";
-      window.scrollTo(0, savedScrollY.current);
-    }
-    return () => {
-      document.body.style.position = "";
-      document.body.style.top = "";
-      document.body.style.left = "";
-      document.body.style.right = "";
-    };
-  }, [open, closing]);
-
   useEffect(() => {
     // Don't scroll on first render — wait for the open animation
     if (messages.length > 1) {
@@ -389,6 +361,36 @@ export default function ChatWidget({
               justifyContent: "flex-end",
               gap: 10,
               fontFamily: "var(--chat-font-body, 'Nunito', sans-serif)",
+            }}
+            onWheel={(e) => {
+              const el = e.currentTarget;
+              const atTop = el.scrollTop === 0;
+              const atBottom =
+                el.scrollTop + el.clientHeight >= el.scrollHeight - 1;
+              if (
+                (atTop && e.deltaY < 0) ||
+                (atBottom && e.deltaY > 0)
+              ) {
+                e.preventDefault();
+              }
+            }}
+            onTouchStart={(e) => {
+              (e.currentTarget as any)._touchStartY =
+                e.touches[0].clientY;
+            }}
+            onTouchMove={(e) => {
+              const el = e.currentTarget;
+              const startY = (el as any)._touchStartY ?? 0;
+              const deltaY = startY - e.touches[0].clientY;
+              const atTop = el.scrollTop === 0;
+              const atBottom =
+                el.scrollTop + el.clientHeight >= el.scrollHeight - 1;
+              if (
+                (atTop && deltaY < 0) ||
+                (atBottom && deltaY > 0)
+              ) {
+                e.preventDefault();
+              }
             }}
           >
             {messages.map((m, i) => (
