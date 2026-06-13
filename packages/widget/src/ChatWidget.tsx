@@ -357,6 +357,7 @@ export default function ChatWidget({
               padding: "12px 16px",
               display: "flex",
               flexDirection: "column",
+              justifyContent: "flex-end",
               gap: 10,
               fontFamily: "var(--chat-font-body, 'Nunito', sans-serif)",
             }}
