@@ -22,7 +22,77 @@ agente-core-tp3/
 
 **Un solo worker atiende a N clientes.** Cada cliente se identifica por `CLIENT_ID` (variable de entorno en wrangler). El sistema de prompts selecciona los `.md` correspondientes al cliente en runtime.
 
-## Workflows
+## Cómo se relacionan los repos
+
+```
+┌─ agente-core-tp3 (fuente de verdad del agente) ─────┐
+│                                                      │
+│  packages/agent/                                     │
+│  ├─ ./deploy.sh tp3studio                            │
+│  │  → despliega tp3studio-chat.iaforchange.workers.dev   │
+│  │                                                  │
+│  └─ ./deploy.sh varsana (futuro)                    │
+│     → despliega varsana-chat.iaforchange.workers.dev│
+│                                                      │
+│  packages/widget/                                    │
+│  └─ editar → build → bump → npm publish             │
+│     → @tp3/chat-widget se actualiza en npm          │
+│                                                      │
+└──────────────────────────────────────────────────────┘
+         │                              │
+         ▼                              ▼
+┌─ tp3studio.com ───┐    ┌─ varsana.co ──────────┐
+│ npm update widget  │    │ npm update widget     │
+│ npm run deploy     │    │ deploy                │
+└────────────────────┘    └───────────────────────┘
+```
+
+### Workers por proyecto — dos workers distintos
+
+Cada proyecto de Tp3studio usa **dos workers separados**:
+
+| Worker | URL | Repo | Qué hace |
+|--------|-----|------|----------|
+| `tp3studio` | `tp3studio.iaforchange.workers.dev` | tp3studio | Sirve el HTML del sitio (Astro SSR) |
+| `tp3studio-chat` | `tp3studio-chat.iaforchange.workers.dev` | agente-core-tp3 | WebSocket + API del agente IA |
+
+El widget (`@tp3/chat-widget`) se conecta por WebSocket al worker del agente, no al worker del sitio.
+
+### Tres workflows independientes
+
+**Workflow 1 — Editar el agente (comportamiento/prompts):**
+```
+1. Editar prompts/ o index.ts en packages/agent/
+2. ./deploy.sh <cliente>
+3. El worker se actualiza instantáneamente en Cloudflare
+   → los widgets de todos los sitios ven el cambio sin tocar nada
+```
+
+**Workflow 2 — Editar el widget (UI/UX):**
+```
+1. Editar ChatWidget.tsx en packages/widget/
+2. npm run build
+3. Bump version (0.1.3 → 0.1.4)
+4. npm publish --access public
+5. En cada sitio: npm update @tp3/chat-widget + deploy
+   → el widget nuevo se empaqueta en el build del sitio
+```
+
+**Workflow 3 — Agregar un cliente nuevo:**
+```
+1. Crear prompts/<cliente>/ con sus 4 .md
+2. Agregar entrada al mapa en prompts.ts
+3. Crear wrangler-<cliente>.jsonc (copiar de tp3studio)
+4. Setear DEEPSEEK_API_KEY como secret
+5. ./deploy.sh <cliente>
+   → nuevo worker independiente en Cloudflare
+6. En el sitio del cliente: npm install @tp3/chat-widget
+   → <ChatWidget agentHost="<cliente>-chat.iaforchange.workers.dev" />
+```
+
+**El worker original de tp3studio NO se eliminó.** El código se movió de `tp3studio/src/workers/` a `agente-core-tp3/packages/agent/src/`, pero se despliega con el mismo `name: "tp3studio-chat"`. La URL `tp3studio-chat.iaforchange.workers.dev` sigue siendo la misma.
+
+## Workflows operativos
 
 ### Agregar un cliente nuevo
 
