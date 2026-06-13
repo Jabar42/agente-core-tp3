@@ -64,10 +64,13 @@ export default function ChatWidget({
   const wsRef = useRef<WebSocket | null>(null);
   const messagesEnd = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+  const chatWindowRef = useRef<HTMLDivElement>(null);
   const typewriterQueue = useRef<string[]>([]);
   const typewriterTimer = useRef<ReturnType<typeof setInterval> | null>(null);
 
-  // Lock body scroll when chat is open (no overflow:hidden to avoid keyboard issues)
+  // Lock body scroll when chat is open. Uses two mechanisms:
+  // 1. position:fixed on body (mobile keyboard safe)
+  // 2. wheel/touch listeners on the chat window to prevent event leakage
   useEffect(() => {
     if (open && !closing) {
       const scrollY = window.scrollY;
@@ -89,6 +92,28 @@ export default function ChatWidget({
       if (open) window.scrollTo(0, top);
     };
   }, [open, closing]);
+
+  // Prevent events on the chat window from scrolling the page behind.
+  // Only blocks events targeting the window itself, not the scrollable messages area.
+  useEffect(() => {
+    const el = chatWindowRef.current;
+    if (!el || !open) return;
+
+    function blockIfOutsideMessages(e: WheelEvent | TouchEvent) {
+      const target = e.target as HTMLElement;
+      // Allow scroll inside the messages container
+      if (target.closest('[data-chat-messages]')) return;
+      e.preventDefault();
+    }
+
+    el.addEventListener("wheel", blockIfOutsideMessages, { passive: false });
+    el.addEventListener("touchmove", blockIfOutsideMessages, { passive: false });
+
+    return () => {
+      el.removeEventListener("wheel", blockIfOutsideMessages);
+      el.removeEventListener("touchmove", blockIfOutsideMessages);
+    };
+  }, [open]);
 
   useEffect(() => {
     // Don't scroll on first render — wait for the open animation
@@ -305,6 +330,7 @@ export default function ChatWidget({
 
       {open && (
         <div
+          ref={chatWindowRef}
           className={closing ? "chat-window-out" : "chat-window"}
           style={{
             position: "fixed",
@@ -315,6 +341,7 @@ export default function ChatWidget({
             maxWidth: "calc(100vw - 48px)",
             height: chatHeight,
             maxHeight: "calc(100dvh - 48px)",
+            overscrollBehavior: "contain",
             background: "var(--chat-primary-fg, #fff)",
             display: "flex",
             flexDirection: "column",
@@ -374,6 +401,7 @@ export default function ChatWidget({
 
           {/* Messages */}
           <div
+            data-chat-messages
             style={{
               flex: 1,
               overflowY: "auto",
