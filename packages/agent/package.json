@@ -1,0 +1,16 @@
+{
+  "name": "@tp3studio/agent",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "deploy": "bash deploy.sh",
+    "deploy:tp3studio": "wrangler deploy -c wrangler-tp3studio.jsonc"
+  },
+  "dependencies": {
+    "agents": "^0.15.0"
+  },
+  "devDependencies": {
+    "wrangler": "^4.97.0",
+    "@cloudflare/workers-types": "^4.20260611.0"
+  }
+}

@@ -1,0 +1,5 @@
+{
+  "name": "agente-core-tp3",
+  "private": true,
+  "workspaces": ["packages/*"]
+}
