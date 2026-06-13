@@ -13,6 +13,10 @@ import tp3studio_soul from "./prompts/tp3studio/SOUL.md";
 import tp3studio_skills from "./prompts/tp3studio/SKILLS.md";
 import tp3studio_rules from "./prompts/tp3studio/RULES.md";
 import tp3studio_context from "./prompts/tp3studio/CONTEXT.md";
+import varsana_soul from "./prompts/varsana/SOUL.md";
+import varsana_skills from "./prompts/varsana/SKILLS.md";
+import varsana_rules from "./prompts/varsana/RULES.md";
+import varsana_context from "./prompts/varsana/CONTEXT.md";
 
 const PROMPTS: Record<string, string> = {
   tp3studio: [
@@ -20,6 +24,14 @@ const PROMPTS: Record<string, string> = {
     tp3studio_skills,
     tp3studio_rules,
     tp3studio_context,
+  ]
+    .map((s) => s.trim())
+    .join("\n\n"),
+  varsana: [
+    varsana_soul,
+    varsana_skills,
+    varsana_rules,
+    varsana_context,
   ]
     .map((s) => s.trim())
     .join("\n\n"),

@@ -1,0 +1,21 @@
+{
+  "name": "varsana-chat",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-06-03",
+  "compatibility_flags": ["nodejs_compat"],
+  "rules": [
+    { "type": "Text", "globs": ["**/*.md"], "fallthrough": true }
+  ],
+  "vars": {
+    "CLIENT_ID": "varsana"
+  },
+  "durable_objects": {
+    "bindings": [
+      { "name": "Tp3ChatAgent", "class_name": "Tp3ChatAgent" }
+    ]
+  },
+  "migrations": [
+    { "tag": "v1", "new_sqlite_classes": ["Tp3ChatAgent"] }
+  ],
+  "observability": { "enabled": true }
+}
