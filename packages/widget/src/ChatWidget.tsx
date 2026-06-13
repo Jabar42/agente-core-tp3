@@ -268,6 +268,7 @@ export default function ChatWidget({
             display: "flex",
             alignItems: "center",
             justifyContent: "center",
+            flexShrink: 0,
             boxShadow: "var(--chat-shadow)",
           }}
           aria-label="Abrir chat"
@@ -461,6 +462,10 @@ export default function ChatWidget({
                 color: "var(--chat-primary-fg)",
                 border: "none",
                 cursor: "pointer",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                flexShrink: 0,
                 opacity: loading || !input.trim() ? 0.4 : 1,
               }}
               title="Enviar"
