@@ -1,20 +1,21 @@
 {
-  "name": "@tp3studio/chat-widget",
-  "version": "0.1.0",
-  "main": "dist/index.js",
-  "module": "dist/index.mjs",
-  "types": "dist/index.d.ts",
+  "name": "@tp3/chat-widget",
+  "version": "0.1.1",
+  "main": "dist/ChatWidget.js",
+  "module": "dist/ChatWidget.mjs",
+  "types": "dist/ChatWidget.d.ts",
   "exports": {
     ".": {
-      "import": "./dist/index.mjs",
-      "require": "./dist/index.js"
+      "import": "./dist/ChatWidget.mjs",
+      "require": "./dist/ChatWidget.js"
     }
   },
   "scripts": {
-    "build": "tsup src/ChatWidget.tsx --format esm,cjs --dts",
-    "publish": "npm publish --access public"
+    "build": "tsup src/ChatWidget.tsx --format esm,cjs --dts"
   },
   "devDependencies": {
+    "@types/react": "^19.2.17",
+    "@types/react-dom": "^19.2.3",
     "tsup": "^8.0.0",
     "typescript": "^5.0.0"
   },

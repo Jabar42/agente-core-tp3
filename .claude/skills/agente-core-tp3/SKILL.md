@@ -15,7 +15,7 @@ agente-core-tp3/
 │   │   │       └── <cliente>/     ← SOUL.md, SKILLS.md, RULES.md, CONTEXT.md
 │   │   ├── wrangler-<cliente>.jsonc  ← Una config por cliente
 │   │   └── deploy.sh              ← Deploy selectivo por cliente
-│   └── widget/             ← @tp3studio/chat-widget (React, publicable a npm)
+│   └── widget/             ← @tp3/chat-widget (React, publicable a npm)
 │       └── src/ChatWidget.tsx
 └── package.json            ← npm workspaces root
 ```
@@ -139,11 +139,11 @@ npm publish --access public
 
 Luego en cualquier proyecto:
 ```bash
-npm install @tp3studio/chat-widget
+npm install @tp3/chat-widget
 ```
 
 ```tsx
-import ChatWidget from "@tp3studio/chat-widget";
+import ChatWidget from "@tp3/chat-widget";
 <ChatWidget agentHost="tp3studio-chat.iaforchange.workers.dev" />
 ```
 

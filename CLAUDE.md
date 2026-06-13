@@ -25,5 +25,5 @@ npm run build
 ## Architecture
 
 - `packages/agent` — Cloudflare Worker multi-cliente (Agents SDK + DeepSeek SSE)
-- `packages/widget` — ChatWidget React con `agentHost` prop (publicable como `@tp3studio/chat-widget`)
+- `packages/widget` — ChatWidget React con `agentHost` prop (publicable como `@tp3/chat-widget`)
 - Prompts modulares por cliente: `SOUL.md`, `SKILLS.md`, `RULES.md`, `CONTEXT.md`

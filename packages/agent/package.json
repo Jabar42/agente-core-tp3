@@ -1,5 +1,5 @@
 {
-  "name": "@tp3studio/agent",
+  "name": "@tp3/agent",
   "private": true,
   "type": "module",
   "scripts": {
