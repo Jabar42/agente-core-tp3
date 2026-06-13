@@ -68,12 +68,19 @@ export default function ChatWidget({
   const typewriterTimer = useRef<ReturnType<typeof setInterval> | null>(null);
 
   useEffect(() => {
-    messagesEnd.current?.scrollIntoView({ behavior: "smooth" });
+    // Don't scroll on first render — wait for the open animation
+    if (messages.length > 1) {
+      messagesEnd.current?.scrollIntoView({ behavior: "smooth" });
+    }
   }, [messages]);
 
   useEffect(() => {
     if (!loading && open) {
-      inputRef.current?.focus();
+      // Delay focus until open animation finishes (350ms)
+      const timer = setTimeout(() => {
+        inputRef.current?.focus();
+      }, 400);
+      return () => clearTimeout(timer);
     }
   }, [loading, open]);
 
@@ -284,12 +291,11 @@ export default function ChatWidget({
             width: chatWidth,
             maxWidth: "calc(100vw - 48px)",
             height: chatHeight,
-            maxHeight: "calc(100vh - 48px)",
+            maxHeight: "calc(100dvh - 48px)",
             background: "var(--chat-primary-fg)",
             display: "flex",
             flexDirection: "column",
             borderRadius: 16,
-            overflow: "hidden",
             boxShadow: "var(--chat-shadow-lg)",
           }}
         >
