@@ -67,6 +67,29 @@ export default function ChatWidget({
   const typewriterQueue = useRef<string[]>([]);
   const typewriterTimer = useRef<ReturnType<typeof setInterval> | null>(null);
 
+  // Lock body scroll when chat is open (no overflow:hidden to avoid keyboard issues)
+  useEffect(() => {
+    if (open && !closing) {
+      const scrollY = window.scrollY;
+      document.body.style.position = "fixed";
+      document.body.style.top = `-${scrollY}px`;
+      document.body.style.width = "100%";
+    } else if (!open) {
+      const top = Math.abs(parseInt(document.body.style.top || "0", 10));
+      document.body.style.position = "";
+      document.body.style.top = "";
+      document.body.style.width = "";
+      window.scrollTo(0, top);
+    }
+    return () => {
+      const top = Math.abs(parseInt(document.body.style.top || "0", 10));
+      document.body.style.position = "";
+      document.body.style.top = "";
+      document.body.style.width = "";
+      if (open) window.scrollTo(0, top);
+    };
+  }, [open, closing]);
+
   useEffect(() => {
     // Don't scroll on first render — wait for the open animation
     if (messages.length > 1) {
@@ -354,6 +377,7 @@ export default function ChatWidget({
             style={{
               flex: 1,
               overflowY: "auto",
+              overscrollBehavior: "contain",
               padding: "12px 16px",
               display: "flex",
               flexDirection: "column",
