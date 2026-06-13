@@ -67,18 +67,31 @@ export default function ChatWidget({
   const typewriterQueue = useRef<string[]>([]);
   const typewriterTimer = useRef<ReturnType<typeof setInterval> | null>(null);
 
-  // Lock scroll on the page behind the chat.
-  // Using overflow:hidden on <html> is the standard approach used by
-  // modal/chat libraries — it blocks wheel and touch scroll on desktop
-  // and mobile without interfering with the keyboard or viewport.
+  // Lock scroll on the page behind the chat without blocking scroll
+  // inside the chat messages area. Uses position:fixed on body — the
+  // chat window is also fixed, so it stays visible and its internal
+  // overflow-y:auto container scrolls independently.
+  const savedScrollY = useRef(0);
+
   useEffect(() => {
     if (open && !closing) {
-      document.documentElement.style.overflow = "hidden";
+      savedScrollY.current = window.scrollY;
+      document.body.style.position = "fixed";
+      document.body.style.top = `-${savedScrollY.current}px`;
+      document.body.style.left = "0";
+      document.body.style.right = "0";
     } else {
-      document.documentElement.style.overflow = "";
+      document.body.style.position = "";
+      document.body.style.top = "";
+      document.body.style.left = "";
+      document.body.style.right = "";
+      window.scrollTo(0, savedScrollY.current);
     }
     return () => {
-      document.documentElement.style.overflow = "";
+      document.body.style.position = "";
+      document.body.style.top = "";
+      document.body.style.left = "";
+      document.body.style.right = "";
     };
   }, [open, closing]);
 
