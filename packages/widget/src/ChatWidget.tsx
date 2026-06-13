@@ -254,15 +254,15 @@ export default function ChatWidget({
             width: 56,
             height: 56,
             borderRadius: 16,
-            background: "var(--chat-primary)",
-            color: "var(--chat-primary-fg)",
+            background: "var(--chat-primary, #6366F1)",
+            color: "var(--chat-primary-fg, #fff)",
             border: "none",
             cursor: "pointer",
             display: "flex",
             alignItems: "center",
             justifyContent: "center",
             flexShrink: 0,
-            boxShadow: "var(--chat-shadow)",
+            boxShadow: "var(--chat-shadow, 0 8px 24px rgba(0,0,0,.12))",
           }}
           aria-label="Abrir chat"
         >
@@ -292,18 +292,18 @@ export default function ChatWidget({
             maxWidth: "calc(100vw - 48px)",
             height: chatHeight,
             maxHeight: "calc(100dvh - 48px)",
-            background: "var(--chat-primary-fg)",
+            background: "var(--chat-primary-fg, #fff)",
             display: "flex",
             flexDirection: "column",
             borderRadius: 16,
-            boxShadow: "var(--chat-shadow-lg)",
+            boxShadow: "var(--chat-shadow-lg, 0 12px 48px rgba(0,0,0,.18))",
           }}
         >
           {/* Header */}
           <div
             style={{
-              background: "var(--chat-primary)",
-              color: "var(--chat-primary-fg)",
+              background: "var(--chat-primary, #6366F1)",
+              color: "var(--chat-primary-fg, #fff)",
               padding: "14px 20px",
               display: "flex",
               alignItems: "center",
@@ -314,7 +314,7 @@ export default function ChatWidget({
             <div>
               <div
                 style={{
-                  fontFamily: "var(--chat-font-heading)",
+                  fontFamily: "var(--chat-font-heading, 'Outfit', sans-serif)",
                   fontWeight: 600,
                   fontSize: 16,
                 }}
@@ -338,9 +338,9 @@ export default function ChatWidget({
                 width: 32,
                 height: 32,
                 borderRadius: 12,
-                background: "var(--chat-close-btn-bg)",
+                background: "var(--chat-close-btn-bg, rgba(255,255,255,.1))",
                 border: "none",
-                color: "var(--chat-primary-fg)",
+                color: "var(--chat-primary-fg, #fff)",
                 cursor: "pointer",
               }}
               aria-label="Cerrar chat"
@@ -358,7 +358,7 @@ export default function ChatWidget({
               display: "flex",
               flexDirection: "column",
               gap: 10,
-              fontFamily: "var(--chat-font-body)",
+              fontFamily: "var(--chat-font-body, 'Nunito', sans-serif)",
             }}
           >
             {messages.map((m, i) => (
@@ -374,12 +374,12 @@ export default function ChatWidget({
                   alignSelf: m.role === "user" ? "flex-end" : "flex-start",
                   background:
                     m.role === "user"
-                      ? "var(--chat-primary)"
-                      : "var(--chat-bot-bubble)",
+                      ? "var(--chat-primary, #6366F1)"
+                      : "var(--chat-bot-bubble, #F4F4F5)",
                   color:
                     m.role === "user"
-                      ? "var(--chat-primary-fg)"
-                      : "var(--chat-bot-text)",
+                      ? "var(--chat-primary-fg, #fff)"
+                      : "var(--chat-bot-text, #18181B)",
                   borderBottomRightRadius: m.role === "user" ? 4 : 16,
                   borderBottomLeftRadius: m.role === "user" ? 16 : 4,
                 }}
@@ -400,7 +400,7 @@ export default function ChatWidget({
                 className="typing-indicator"
                 style={{
                   alignSelf: "flex-start",
-                  background: "var(--chat-bot-bubble)",
+                  background: "var(--chat-bot-bubble, #F4F4F5)",
                   borderRadius: 16,
                   borderBottomLeftRadius: 4,
                 }}
@@ -423,7 +423,7 @@ export default function ChatWidget({
               display: "flex",
               gap: 8,
               padding: "12px 16px 16px",
-              borderTop: "1px solid var(--chat-border)",
+              borderTop: "1px solid var(--chat-border, #E4E4E7)",
               flexShrink: 0,
             }}
           >
@@ -436,11 +436,11 @@ export default function ChatWidget({
               style={{
                 flex: 1,
                 padding: "10px 14px",
-                border: "1px solid var(--chat-border)",
+                border: "1px solid var(--chat-border, #E4E4E7)",
                 borderRadius: 12,
                 fontSize: 14,
                 outline: "none",
-                fontFamily: "var(--chat-font-body)",
+                fontFamily: "var(--chat-font-body, 'Nunito', sans-serif)",
               }}
             />
             <button
@@ -450,8 +450,8 @@ export default function ChatWidget({
                 width: 40,
                 height: 40,
                 borderRadius: 12,
-                background: "var(--chat-primary)",
-                color: "var(--chat-primary-fg)",
+                background: "var(--chat-primary, #6366F1)",
+                color: "var(--chat-primary-fg, #fff)",
                 border: "none",
                 cursor: "pointer",
                 display: "flex",
