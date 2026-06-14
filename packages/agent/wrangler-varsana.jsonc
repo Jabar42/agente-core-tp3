@@ -7,7 +7,8 @@
     { "type": "Text", "globs": ["**/*.md"], "fallthrough": true }
   ],
   "vars": {
-    "CLIENT_ID": "varsana"
+    "CLIENT_ID": "varsana",
+    "TOOLS_URL": "https://varsana-co.iaforchange.workers.dev"
   },
   "durable_objects": {
     "bindings": [
