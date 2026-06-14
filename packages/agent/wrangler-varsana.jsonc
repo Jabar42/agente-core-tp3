@@ -8,7 +8,7 @@
   ],
   "vars": {
     "CLIENT_ID": "varsana",
-    "MCP_URL": "https://varsana-mcp.iaforchange.workers.dev"
+    "TOOLS_URL": "https://varsana-co.iaforchange.workers.dev"
   },
   "durable_objects": {
     "bindings": [
