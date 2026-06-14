@@ -1,10 +1,9 @@
-import { McpAgent } from "agents/mcp";
+import { createMcpHandler } from "agents/mcp";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 
 interface Env {
   API_BASE_URL: string;
-  VarsanaMcpAgent: DurableObjectNamespace;
 }
 
 const TOOL_TIMEOUT_MS = 8000;
@@ -21,40 +20,35 @@ async function fetchCollection(apiBase: string, collection: string, slug?: strin
   return await response.json();
 }
 
-export class VarsanaMcpAgent extends McpAgent<Env> {
-  async init(): Promise<void> {}
+function buildServer(apiBase: string) {
+  const server = new McpServer({
+    name: "varsana-mcp",
+    version: "1.0.0",
+  });
 
-  get server(): McpServer {
-    const apiBase = this.env.API_BASE_URL;
-    const mcp = new McpServer({
-      name: "varsana-mcp",
-      version: "1.0.0",
-    });
-
-    mcp.registerTool(
-      "get_collection",
-      {
-        description:
-          "Consulta datos de una coleccion de Varsana: 'events', 'pasadias', 'nosotros'. Sin slug devuelve hasta 5 entradas. Con slug devuelve el detalle completo.",
-        inputSchema: {
-          collection: z.enum(["events", "pasadias", "nosotros"]),
-          slug: z.string().optional().describe("Slug para detalle completo"),
-        },
+  server.registerTool(
+    "get_collection",
+    {
+      description:
+        "Consulta datos de una coleccion de Varsana: 'events', 'pasadias', 'nosotros'. Sin slug devuelve hasta 5 entradas. Con slug devuelve el detalle completo.",
+      inputSchema: {
+        collection: z.enum(["events", "pasadias", "nosotros"]),
+        slug: z.string().optional().describe("Slug para detalle completo"),
       },
-      async ({ collection, slug }) => {
-        const data = await fetchCollection(
-          apiBase,
-          collection as string,
-          slug ?? undefined,
-        );
-        return {
-          content: [{ type: "text" as const, text: JSON.stringify(data) }],
-        };
-      },
-    );
+    },
+    async ({ collection, slug }) => {
+      const data = await fetchCollection(
+        apiBase,
+        collection as string,
+        slug ?? undefined,
+      );
+      return {
+        content: [{ type: "text" as const, text: JSON.stringify(data) }],
+      };
+    },
+  );
 
-    return mcp;
-  }
+  return server;
 }
 
 export default {
@@ -63,10 +57,18 @@ export default {
     if (url.pathname === "/health") {
       return Response.json({ status: "ok", mcp: "varsana" });
     }
-    // Delegate to the DO
-    const ns = env.VarsanaMcpAgent;
-    const id = ns.idFromName("mcp");
-    const stub = ns.get(id);
-    return stub.fetch(request);
+    // Test: just return OK without MCP to verify the Worker works
+    if (url.pathname === "/test") {
+      return Response.json({ ok: true, apiBase: env.API_BASE_URL });
+    }
+    try {
+      const handler = createMcpHandler(
+        buildServer(env.API_BASE_URL),
+        { route: "/mcp" },
+      );
+      return handler(request, env);
+    } catch (err: any) {
+      return new Response("MCP Error: " + (err.message || "unknown"), { status: 500 });
+    }
   },
 };
