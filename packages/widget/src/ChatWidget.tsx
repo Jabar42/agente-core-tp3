@@ -299,10 +299,19 @@ export default function ChatWidget({
             boxShadow: "var(--chat-shadow-lg, 0 12px 48px rgba(0,0,0,.18))",
             touchAction: "none",
           }}
-          onWheel={(e) => e.stopPropagation()}
-          onTouchStart={(e) => e.stopPropagation()}
-          onTouchMove={(e) => e.stopPropagation()}
-          onTouchEnd={(e) => e.stopPropagation()}
+          ref={(el) => {
+            if (!el) return;
+            el.onwheel = null; // cleanup previous
+            el.onwheel = (e) => {
+              // Only block wheel on non-scrollable parts of the chat
+              // (header, input area, empty space). The messages area
+              // scrolls normally via overscroll-behavior: contain.
+              const target = e.target as HTMLElement;
+              if (!target.closest("[data-chat-messages]")) {
+                e.preventDefault();
+              }
+            };
+          }}
         >
           {/* Header */}
           <div
@@ -356,6 +365,7 @@ export default function ChatWidget({
 
           {/* Messages */}
           <div
+            data-chat-messages
             style={{
               flex: 1,
               overflowY: "auto",
