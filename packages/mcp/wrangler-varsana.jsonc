@@ -1,0 +1,18 @@
+{
+  "name": "varsana-mcp",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-06-14",
+  "compatibility_flags": ["nodejs_compat"],
+  "vars": {
+    "API_BASE_URL": "https://varsana-co.iaforchange.workers.dev"
+  },
+  "durable_objects": {
+    "bindings": [
+      { "name": "VarsanaMcpAgent", "class_name": "VarsanaMcpAgent" }
+    ]
+  },
+  "migrations": [
+    { "tag": "v1", "new_sqlite_classes": ["VarsanaMcpAgent"] }
+  ],
+  "observability": { "enabled": true }
+}
