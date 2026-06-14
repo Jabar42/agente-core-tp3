@@ -297,6 +297,20 @@ export default function ChatWidget({
             flexDirection: "column",
             borderRadius: 16,
             boxShadow: "var(--chat-shadow-lg, 0 12px 48px rgba(0,0,0,.18))",
+            touchAction: "none",
+          }}
+          ref={(el) => {
+            if (!el) return;
+            el.onwheel = null; // cleanup previous
+            el.onwheel = (e) => {
+              // Only block wheel on non-scrollable parts of the chat
+              // (header, input area, empty space). The messages area
+              // scrolls normally via overscroll-behavior: contain.
+              const target = e.target as HTMLElement;
+              if (!target.closest("[data-chat-messages]")) {
+                e.preventDefault();
+              }
+            };
           }}
         >
           {/* Header */}
@@ -351,46 +365,18 @@ export default function ChatWidget({
 
           {/* Messages */}
           <div
+            data-chat-messages
             style={{
               flex: 1,
               overflowY: "auto",
               overscrollBehavior: "contain",
+              touchAction: "pan-y",
               padding: "12px 16px",
               display: "flex",
               flexDirection: "column",
               justifyContent: "flex-end",
               gap: 10,
               fontFamily: "var(--chat-font-body, 'Nunito', sans-serif)",
-            }}
-            onWheel={(e) => {
-              const el = e.currentTarget;
-              const atTop = el.scrollTop === 0;
-              const atBottom =
-                el.scrollTop + el.clientHeight >= el.scrollHeight - 1;
-              if (
-                (atTop && e.deltaY < 0) ||
-                (atBottom && e.deltaY > 0)
-              ) {
-                e.preventDefault();
-              }
-            }}
-            onTouchStart={(e) => {
-              (e.currentTarget as any)._touchStartY =
-                e.touches[0].clientY;
-            }}
-            onTouchMove={(e) => {
-              const el = e.currentTarget;
-              const startY = (el as any)._touchStartY ?? 0;
-              const deltaY = startY - e.touches[0].clientY;
-              const atTop = el.scrollTop === 0;
-              const atBottom =
-                el.scrollTop + el.clientHeight >= el.scrollHeight - 1;
-              if (
-                (atTop && deltaY < 0) ||
-                (atBottom && deltaY > 0)
-              ) {
-                e.preventDefault();
-              }
             }}
           >
             {messages.map((m, i) => (
