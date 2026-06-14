@@ -11,79 +11,11 @@ import { getSystemPrompt } from "./prompts";
 interface Env {
   DEEPSEEK_API_KEY: string;
   CLIENT_ID: string;
-  TOOLS_URL?: string;
+  MCP_URL?: string;
   Tp3ChatAgent: DurableObjectNamespace;
 }
 
 const DEEPSEEK_TIMEOUT_MS = 25000;
-const TOOL_TIMEOUT_MS = 8000;
-
-/**
- * Tool definitions per tool name. Each tool maps to an API endpoint on the
- * client's website. Adding a new tool is just adding an entry here.
- */
-const TOOL_DEFINITIONS: Record<string, {
-  description: string;
-  parameters: Record<string, unknown>;
-  buildUrl: (args: Record<string, any>, toolsUrl: string) => string;
-}> = {
-  get_events: {
-    description: "Lista los proximos eventos (retiros) disponibles con titulos, fechas, precios y disponibilidad. Usa el parametro slug para obtener el detalle completo de un evento especifico incluyendo la descripcion detallada.",
-    parameters: {
-      type: "object",
-      properties: {
-        slug: { type: "string", description: "Slug del evento para obtener detalle completo (opcional)" },
-      },
-    },
-    buildUrl: (args, base) => {
-      const slug = args.slug ? `?slug=${encodeURIComponent(args.slug)}` : "";
-      return `${base}/api/events${slug}`;
-    },
-  },
-  get_pasadias: {
-    description: "Lista los pasadias (experiencias de un dia) disponibles con titulos, precios, duracion y categoria. Usa el parametro slug para obtener el detalle completo de un pasadia especifico.",
-    parameters: {
-      type: "object",
-      properties: {
-        slug: { type: "string", description: "Slug del pasadia para obtener detalle completo (opcional)" },
-      },
-    },
-    buildUrl: (args, base) => {
-      const slug = args.slug ? `?slug=${encodeURIComponent(args.slug)}` : "";
-      return `${base}/api/pasadias${slug}`;
-    },
-  },
-};
-
-async function executeToolCall(
-  name: string,
-  args: Record<string, any>,
-  toolsUrl: string,
-): Promise<string> {
-  const def = TOOL_DEFINITIONS[name];
-  if (!def) return JSON.stringify({ error: `Unknown tool: ${name}` });
-
-  try {
-    const url = def.buildUrl(args, toolsUrl);
-    const response = await fetch(url, {
-      signal: AbortSignal.timeout(TOOL_TIMEOUT_MS),
-    });
-    if (!response.ok) {
-      return JSON.stringify({ error: `API returned status ${response.status}` });
-    }
-    return await response.text();
-  } catch (err: any) {
-    return JSON.stringify({ error: err.message || "Tool execution failed" });
-  }
-}
-
-function getTools(toolsUrl?: string): any[] | undefined {
-  if (!toolsUrl) return undefined;
-  return Object.entries(TOOL_DEFINITIONS).map(([name, def]) => ({
-    type: "function" as const,
-    function: { name, description: def.description, parameters: def.parameters },
-  }));
-}
 
 /**
  * Non-streaming call to DeepSeek. Used by the HTTP /api/chat fallback.
@@ -278,8 +210,33 @@ export class Tp3ChatAgent extends Agent<Env> {
 
       const clientId = this.env.CLIENT_ID || "tp3studio";
       const systemPrompt = getSystemPrompt(clientId);
-      const toolsUrl = this.env.TOOLS_URL;
-      const tools = getTools(toolsUrl);
+      const mcpUrl = this.env.MCP_URL;
+
+      // MCP: discover tools from the MCP server
+      let tools: any[] | undefined;
+      let onToolCall: ((name: string, args: Record<string, any>) => Promise<string>) | undefined;
+
+      if (mcpUrl) {
+        try {
+          await this.addMcpServer(clientId, mcpUrl);
+          const mcpTools = this.listTools();
+          if (mcpTools.length > 0) {
+            tools = mcpTools.map((t: any) => ({
+              type: "function" as const,
+              function: { name: t.name, description: t.description, parameters: t.inputSchema },
+            }));
+            onToolCall = async (name: string, args: Record<string, any>) => {
+              const result = await this.callTool({ name, arguments: args, serverId: clientId }) as any;
+              if (Array.isArray(result?.content)) {
+                return result.content.map((c: any) => c.text || "").join("\n");
+              }
+              return JSON.stringify(result);
+            };
+          }
+        } catch (err: any) {
+          console.error("MCP error:", err.message);
+        }
+      }
 
       const reply = await streamDeepSeek(
         this.env.DEEPSEEK_API_KEY,
@@ -296,9 +253,7 @@ export class Tp3ChatAgent extends Agent<Env> {
           );
         },
         tools,
-        toolsUrl
-          ? (name: string, args: Record<string, any>) => executeToolCall(name, args, toolsUrl)
-          : undefined,
+        onToolCall,
       );
 
       if (reply === null) {
@@ -311,7 +266,7 @@ export class Tp3ChatAgent extends Agent<Env> {
       }
     } catch {
       connection.send(
-        JSON.stringify({ type: "chat-response", message: "Ocurrió un error." }),
+        JSON.stringify({ type: "chat-response", message: "Ocurrio un error." }),
       );
     }
   }
@@ -348,8 +303,24 @@ export default {
 
         const clientId = env.CLIENT_ID || "tp3studio";
         const systemPrompt = getSystemPrompt(clientId);
-        const toolsUrl = env.TOOLS_URL;
-        const tools = getTools(toolsUrl);
+        // HTTP fallback: use direct REST API (no MCP SDK in fetch handler)
+        const mcpUrl = env.MCP_URL;
+        const apiBase = mcpUrl ? mcpUrl.replace("varsana-mcp", "varsana-co") : undefined;
+        const tools = apiBase ? [{
+          type: "function" as const,
+          function: {
+            name: "get_collection",
+            description: "Consulta eventos, pasadias o nosotros. Parametros: collection (events|pasadias|nosotros), slug (opcional).",
+            parameters: {
+              type: "object",
+              properties: {
+                collection: { type: "string", enum: ["events", "pasadias", "nosotros"] },
+                slug: { type: "string" },
+              },
+              required: ["collection"],
+            },
+          },
+        }] : undefined;
 
         // Use non-streaming with tools for HTTP fallback
         const result = await fetch("https://api.deepseek.com/v1/chat/completions", {
@@ -376,11 +347,15 @@ export default {
         const msg = completion.choices?.[0]?.message;
 
         // Handle tool calls in HTTP fallback
-        if (msg?.tool_calls && toolsUrl) {
+        if (msg?.tool_calls && apiBase) {
           const toolResults: any[] = [];
           for (const tc of msg.tool_calls) {
             const args = tc.function?.arguments ? JSON.parse(tc.function.arguments) : {};
-            const toolResult = await executeToolCall(tc.function.name, args, toolsUrl);
+            const col = args.collection || "events";
+            const slug = args.slug ? "?slug=" + encodeURIComponent(args.slug) : "";
+            const url = apiBase + "/api/" + col + slug;
+            const res = await fetch(url, { signal: AbortSignal.timeout(8000) });
+            const toolResult = res.ok ? await res.text() : JSON.stringify({ error: "API status " + res.status });
             toolResults.push({ role: "tool", tool_call_id: tc.id, content: toolResult });
           }
 
