@@ -1,6 +1,1 @@
-node_modules/
-dist/
-.wrangler/
-.env*
-!.env.example
-*.log
+Nothing needs to be added to .gitignore since the only modified file is a source code file (.tsx) and there are no build artifacts, dependencies, or temporary files in the changes.
