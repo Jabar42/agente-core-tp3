@@ -6,8 +6,15 @@
   "vars": {
     "API_BASE_URL": "https://varsana-co.iaforchange.workers.dev"
   },
+  "durable_objects": {
+    "bindings": [
+      { "name": "VarsanaMCP", "class_name": "VarsanaMCP" }
+    ]
+  },
   "migrations": [
-    { "tag": "v2", "deleted_classes": ["VarsanaMcpAgent"] }
+    { "tag": "v1", "new_sqlite_classes": ["VarsanaMcpAgent"] },
+    { "tag": "v2", "deleted_classes": ["VarsanaMcpAgent"] },
+    { "tag": "v3", "new_sqlite_classes": ["VarsanaMCP"] }
   ],
   "observability": { "enabled": true }
 }
