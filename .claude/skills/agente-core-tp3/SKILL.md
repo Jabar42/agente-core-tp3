@@ -246,6 +246,23 @@ Siempre `Tp3ChatAgent`. No renombrar — hay migraciones de DO que dependen de e
 - `packages/widget/src/ChatWidget.tsx` — solo si se cambia la UI/UX del widget
 - `deploy.sh` — solo si cambia la estrategia de deploy
 
+## Infraestructura del sitio cliente
+
+Cada sitio cliente necesita su propio bucket R2 para imagenes (requiere Workers Paid):
+
+```bash
+npx wrangler r2 bucket create <cliente>-images
+```
+
+El binding en `wrangler.jsonc` del sitio:
+```json
+"r2_buckets": [{ "bucket_name": "<cliente>-images", "binding": "VARSANA_IMAGES" }]
+```
+
+El endpoint de imagenes usa `src/pages/api/images/[...key].ts` (catch-all Astro):
+- `POST /api/images` con `multipart/form-data` (campo `file`) → sube a R2
+- `GET /api/images/:key` → sirve desde R2 con cache inmutable
+
 ## Troubleshooting
 
 | Error | Causa probable |

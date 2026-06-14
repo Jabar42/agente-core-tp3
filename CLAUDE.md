@@ -35,6 +35,27 @@ packages/
     └── src/ChatWidget.tsx
 ```
 
+## Requisitos del plan Cloudflare
+
+**Workers Paid** ($5/mes) requerido para Durable Objects con SQLite, tool-calling DeepSeek, y R2.
+
+## Infraestructura de un cliente nuevo (R2 + Imagenes)
+
+Ademas de los pasos del agente, el sitio del cliente necesita:
+
+1. **R2 bucket** para imagenes:
+   ```bash
+   npx wrangler r2 bucket create <cliente>-images
+   ```
+   Agregar al wrangler.jsonc del sitio:
+   ```json
+   "r2_buckets": [{ "bucket_name": "<cliente>-images", "binding": "VARSANA_IMAGES" }]
+   ```
+
+2. **API de imagenes**: copiar `src/pages/api/images/[...key].ts` de varsanaAstro.
+   - `POST /api/images` → sube a R2, devuelve URL
+   - `GET /api/images/:key` → sirve desde R2 con Cache-Control inmutable
+
 ## Workflow: agregar un nuevo cliente
 
 Cuando el usuario pida desplegar un agente para un nuevo cliente, seguí estos pasos:
