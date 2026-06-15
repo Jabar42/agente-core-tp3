@@ -1,4 +1,3 @@
-
 import { useState, useRef, useEffect, useCallback } from "react";
 
 export interface ChatWidgetProps {
@@ -263,11 +262,15 @@ export default function ChatWidget({
     setMessages((prev) => [...prev, userMsg]);
     setLoading(true);
 
-    // FIX #6: Bounded retry loop with a counter
+    // Reconnect automatically if the socket dropped between messages
+    const state = wsRef.current?.readyState;
+    if (state === undefined || state === WebSocket.CLOSED || state === WebSocket.CLOSING) {
+      connectWs();
+    }
+
     let retries = 0;
     const trySend = () => {
       if (wsRef.current?.readyState === WebSocket.OPEN) {
-        // FIX #1: Read live message state from ref, not stale closure
         const history = messagesRef.current
           .filter((m) => m.role !== "error")
           .slice(-20)
