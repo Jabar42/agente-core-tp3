@@ -200,21 +200,40 @@ El widget define 13 variables CSS con defaults. Para personalizarlo, redefinilas
 ```bash
 cd packages/widget
 
-# Build (genera dist/)
+# 1. Bump version (patch/minor/major)
+npm version patch
+
+# 2. Build (genera dist/)
 npm run build
 
-# Publicar
+# 3. Publicar
 npm publish --access public
 ```
 
-Luego en cualquier proyecto:
+### Actualizar el widget en sitios cliente
+
+Despues de publicar una nueva version, actualizar cada sitio que lo usa:
+
+```bash
+# En tp3studio
+cd ~/Documents/tp3studio
+npm update @tp3/chat-widget
+npm run deploy
+
+# En varsanaAstro
+cd ~/Documents/varsanaAstro
+npm update @tp3/chat-widget
+npm run build && npx wrangler deploy
+```
+
+**Instalacion en un sitio nuevo:**
 ```bash
 npm install @tp3/chat-widget
 ```
 
 ```tsx
 import ChatWidget from "@tp3/chat-widget";
-<ChatWidget agentHost="tp3studio-chat.iaforchange.workers.dev" />
+<ChatWidget agentHost="varsana-chat.iaforchange.workers.dev" brandName="Varsana" />
 ```
 
 La prop `agentHost` es obligatoria. `agentName` es opcional (default: `"tp3-chat-agent"`).

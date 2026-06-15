@@ -6,7 +6,18 @@ import {
   type Connection,
   type ConnectionContext,
 } from "agents";
-import { getSystemPrompt } from "./prompts";
+import { getSystemPrompt, DEFAULTS } from "./prompts";
+import { overviewPage } from "./dashboard/overview";
+import { conversationsPage } from "./dashboard/conversations";
+import { promptsPage } from "./dashboard/prompts";
+import {
+  handleStats,
+  handleConversations,
+  handleConversation,
+  handleGetPrompts,
+  handleSavePrompt,
+  handleCors,
+} from "./dashboard/api";
 
 interface Env {
   DEEPSEEK_API_KEY: string;
@@ -260,9 +271,69 @@ async function streamDeepSeek(
 }
 
 export class Tp3ChatAgent extends Agent<Env> {
+  /**
+   * One-time DB initialization per DO instance. Creates analytics tables
+   * if they don't exist yet.
+   */
+  async initDb() {
+    this.sql`CREATE TABLE IF NOT EXISTS daily_metrics (
+      date TEXT NOT NULL,
+      client_id TEXT NOT NULL,
+      messages INTEGER DEFAULT 0,
+      tool_calls INTEGER DEFAULT 0,
+      tool_errors INTEGER DEFAULT 0,
+      PRIMARY KEY (date, client_id)
+    )`;
+
+    this.sql`CREATE TABLE IF NOT EXISTS conversations (
+      id TEXT PRIMARY KEY,
+      client_id TEXT NOT NULL,
+      created_at TEXT DEFAULT (datetime('now')),
+      updated_at TEXT DEFAULT (datetime('now')),
+      message_count INTEGER DEFAULT 0,
+      last_message TEXT
+    )`;
+
+    this.sql`CREATE TABLE IF NOT EXISTS messages (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      conversation_id TEXT NOT NULL REFERENCES conversations(id),
+      role TEXT NOT NULL CHECK(role IN ('user','assistant','tool')),
+      content TEXT NOT NULL,
+      created_at TEXT DEFAULT (datetime('now'))
+    )`;
+
+    this.sql`CREATE TABLE IF NOT EXISTS tool_calls (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      conversation_id TEXT NOT NULL REFERENCES conversations(id),
+      name TEXT NOT NULL,
+      args TEXT,
+      success INTEGER NOT NULL DEFAULT 1,
+      error_message TEXT,
+      duration_ms INTEGER,
+      created_at TEXT DEFAULT (datetime('now'))
+    )`;
+
+    this.sql`CREATE TABLE IF NOT EXISTS runtime_prompts (
+      client_id TEXT NOT NULL,
+      fragment TEXT NOT NULL CHECK(fragment IN ('SOUL','SKILLS','RULES','CONTEXT')),
+      content TEXT NOT NULL,
+      updated_at TEXT DEFAULT (datetime('now')),
+      PRIMARY KEY (client_id, fragment)
+    )`;
+
+    await this.ctx.storage.put("_db_initialized", "1");
+  }
+
   async onConnect(_connection: Connection, _ctx: ConnectionContext) {
-    // Connection established. The widget shows its own welcome message,
-    // so we just wait for the first user message via onMessage().
+    // Ensure DB is initialized (once per DO instance)
+    const initialized = await this.ctx.storage.get("_db_initialized");
+    if (!initialized) await this.initDb();
+
+    // Create a new conversation row
+    const conversationId = crypto.randomUUID();
+    const clientId = this.env.CLIENT_ID || "tp3studio";
+    this.sql`INSERT INTO conversations (id, client_id) VALUES (${conversationId}, ${clientId})`;
+    await this.ctx.storage.put(`conv:${_connection.id}`, conversationId);
   }
 
   async onMessage(connection: Connection, message: string) {
@@ -270,16 +341,52 @@ export class Tp3ChatAgent extends Agent<Env> {
       const data = JSON.parse(message);
       if (data.type !== "chat" || !data.message) return;
 
+      const clientId = this.env.CLIENT_ID || "tp3studio";
+      const today = new Date().toISOString().slice(0, 10);
+
+      // Resolve or create conversation
+      let conversationId = await this.ctx.storage.get(`conv:${connection.id}`) as string | null;
+      if (!conversationId) {
+        conversationId = crypto.randomUUID();
+        this.sql`INSERT INTO conversations (id, client_id) VALUES (${conversationId}, ${clientId})`;
+        await this.ctx.storage.put(`conv:${connection.id}`, conversationId);
+      }
+
+      // Record user message
+      this.sql`INSERT INTO messages (conversation_id, role, content) VALUES (${conversationId}, 'user', ${data.message})`;
+      this.sql`UPDATE conversations SET message_count = message_count + 1, updated_at = datetime('now'), last_message = ${data.message.slice(0, 200)} WHERE id = ${conversationId}`;
+      // Increment daily counter
+      this.sql`INSERT INTO daily_metrics (date, client_id, messages, tool_calls, tool_errors) VALUES (${today}, ${clientId}, 1, 0, 0) ON CONFLICT (date, client_id) DO UPDATE SET messages = messages + 1`;
+
       const history = (data.history || []).slice(-20).map((m: any) => ({
         role: m.role === "bot" ? "assistant" : m.role,
         content: m.content,
       }));
       history.push({ role: "user", content: data.message });
 
-      const clientId = this.env.CLIENT_ID || "tp3studio";
-      const systemPrompt = getSystemPrompt(clientId);
+      const systemPrompt = getSystemPrompt(clientId, this.sql as any);
       const toolsUrl = this.env.TOOLS_URL;
       const tools = getTools(toolsUrl);
+
+      // Tool callback that records metrics
+      const toolCallback = toolsUrl
+        ? async (name: string, args: Record<string, any>) => {
+            const start = Date.now();
+            try {
+              const result = await executeToolCall(name, args, toolsUrl);
+              const duration = Date.now() - start;
+              const isError = result.includes('"error"');
+              this.sql`INSERT INTO tool_calls (conversation_id, name, args, success, error_message, duration_ms) VALUES (${conversationId}, ${name}, ${JSON.stringify(args)}, ${isError ? 0 : 1}, ${isError ? result.slice(0, 200) : null}, ${duration})`;
+              this.sql`INSERT INTO daily_metrics (date, client_id, messages, tool_calls, tool_errors) VALUES (${today}, ${clientId}, 0, 1, ${isError ? 1 : 0}) ON CONFLICT (date, client_id) DO UPDATE SET tool_calls = tool_calls + 1, tool_errors = tool_errors + ${isError ? 1 : 0}`;
+              return result;
+            } catch (err: any) {
+              const duration = Date.now() - start;
+              this.sql`INSERT INTO tool_calls (conversation_id, name, args, success, error_message, duration_ms) VALUES (${conversationId}, ${name}, ${JSON.stringify(args)}, 0, ${err.message || "Unknown error"}, ${duration})`;
+              this.sql`INSERT INTO daily_metrics (date, client_id, messages, tool_calls, tool_errors) VALUES (${today}, ${clientId}, 0, 1, 1) ON CONFLICT (date, client_id) DO UPDATE SET tool_calls = tool_calls + 1, tool_errors = tool_errors + 1`;
+              return JSON.stringify({ error: err.message || "Tool execution failed" });
+            }
+          }
+        : undefined;
 
       const reply = await streamDeepSeek(
         this.env.DEEPSEEK_API_KEY,
@@ -291,14 +398,15 @@ export class Tp3ChatAgent extends Agent<Env> {
           );
         },
         (fullText) => {
+          // Record assistant message
+          this.sql`INSERT INTO messages (conversation_id, role, content) VALUES (${conversationId}, 'assistant', ${fullText})`;
+          this.sql`UPDATE conversations SET updated_at = datetime('now'), last_message = ${fullText.slice(0, 200)} WHERE id = ${conversationId}`;
           connection.send(
             JSON.stringify({ type: "chat-chunk", full: fullText, done: true }),
           );
         },
         tools,
-        toolsUrl
-          ? (name: string, args: Record<string, any>) => executeToolCall(name, args, toolsUrl)
-          : undefined,
+        toolCallback,
       );
 
       if (reply === null) {
@@ -315,6 +423,68 @@ export class Tp3ChatAgent extends Agent<Env> {
       );
     }
   }
+
+  // ─── Admin RPC methods (called from fetch handler via DO stub) ───
+
+  /** Ensure DB tables exist before running admin queries */
+  async ensureDb() {
+    const initialized = await this.ctx.storage.get("_db_initialized");
+    if (!initialized) await this.initDb();
+  }
+
+  async adminGetStats(clientId: string) {
+    await this.ensureDb();
+    const today = new Date().toISOString().slice(0, 10);
+    const todayRows = this.sql`SELECT messages, tool_calls, tool_errors FROM daily_metrics WHERE date = ${today} AND client_id = ${clientId}` as any[];
+    const seriesRows = this.sql`SELECT date, messages, tool_calls, tool_errors FROM daily_metrics WHERE client_id = ${clientId} ORDER BY date DESC LIMIT 30` as any[];
+    return {
+      today: todayRows[0] || { messages: 0, tool_calls: 0, tool_errors: 0 },
+      series: seriesRows,
+      connections: [...this.getConnections()].length,
+    };
+  }
+
+  async adminGetConversations(limit: number, offset: number) {
+    await this.ensureDb();
+    const rows = this.sql`SELECT id, client_id, created_at, updated_at, message_count, last_message FROM conversations ORDER BY updated_at DESC LIMIT ${limit} OFFSET ${offset}` as any[];
+    return { conversations: rows };
+  }
+
+  async adminGetConversation(conversationId: string) {
+    await this.ensureDb();
+    const rows = this.sql`SELECT role, content, created_at FROM messages WHERE conversation_id = ${conversationId} ORDER BY created_at ASC` as any[];
+    return { messages: rows };
+  }
+
+  async adminGetPrompts(clientId: string) {
+    await this.ensureDb();
+    const rows = this.sql`SELECT fragment, content FROM runtime_prompts WHERE client_id = ${clientId}` as any[];
+    const defaults = DEFAULTS[clientId] ?? DEFAULTS["tp3studio"];
+    const fragments = ["SOUL", "SKILLS", "RULES", "CONTEXT"];
+    const overrides: Record<string, string> = {};
+    for (const r of rows) {
+      if (r.content && r.content.trim()) {
+        overrides[r.fragment] = r.content;
+      }
+    }
+    return {
+      prompts: fragments.map((f) => ({
+        fragment: f,
+        content: overrides[f] !== undefined ? overrides[f] : (defaults[f] || ""),
+        hasOverride: overrides[f] !== undefined,
+      })),
+    };
+  }
+
+  async adminSavePrompt(clientId: string, fragment: string, content: string) {
+    await this.ensureDb();
+    if (!content || !content.trim()) {
+      // Empty content = reset to compiled default
+      this.sql`DELETE FROM runtime_prompts WHERE client_id = ${clientId} AND fragment = ${fragment}`;
+    } else {
+      this.sql`INSERT INTO runtime_prompts (client_id, fragment, content, updated_at) VALUES (${clientId}, ${fragment}, ${content}, datetime('now')) ON CONFLICT (client_id, fragment) DO UPDATE SET content = ${content}, updated_at = datetime('now')`;
+    }
+  }
 }
 
 const corsHeaders = {
@@ -329,7 +499,45 @@ export default {
     const url = new URL(request.url);
 
     if (request.method === "OPTIONS")
-      return new Response(null, { headers: corsHeaders });
+      return handleCors();
+
+    // ── Admin dashboard routes ──
+    if (url.pathname === "/admin" || url.pathname === "/admin/") {
+      return new Response(overviewPage(), {
+        headers: { "Content-Type": "text/html; charset=utf-8", ...corsHeaders },
+      });
+    }
+    if (url.pathname === "/admin/conversations") {
+      return new Response(conversationsPage(), {
+        headers: { "Content-Type": "text/html; charset=utf-8", ...corsHeaders },
+      });
+    }
+    if (url.pathname === "/admin/prompts") {
+      return new Response(promptsPage(env.CLIENT_ID || "tp3studio"), {
+        headers: { "Content-Type": "text/html; charset=utf-8", ...corsHeaders },
+      });
+    }
+
+    // ── Admin API routes ──
+    if (url.pathname === "/admin/api/stats") {
+      return handleStats(env, url);
+    }
+    if (url.pathname === "/admin/api/conversations") {
+      return handleConversations(env, url);
+    }
+    if (url.pathname.startsWith("/admin/api/conversations/")) {
+      const id = url.pathname.slice("/admin/api/conversations/".length);
+      if (!id) return new Response("Missing conversation id", { status: 400, headers: corsHeaders });
+      return handleConversation(env, id);
+    }
+    if (url.pathname === "/admin/api/prompts") {
+      if (request.method === "POST") {
+        return handleSavePrompt(env, request);
+      }
+      return handleGetPrompts(env, url);
+    }
+
+    // ── Existing routes ──
     if (url.pathname === "/health")
       return Response.json(
         { status: "ok", agent: "tp3studio-chat" },
@@ -425,6 +633,21 @@ export default {
           { reply: "Error al procesar el mensaje." },
           { status: 500, headers: corsHeaders },
         );
+      }
+    }
+
+    // Rewrite agent URLs to use a fixed DO instance name ("chat")
+    // so the admin dashboard and all WebSocket sessions share one DO.
+    // The widget appends a random session ID to the URL —
+    // we ignore it and route everything to the same DO.
+    if (url.pathname.startsWith("/agents/")) {
+      const parts = url.pathname.split("/");
+      // parts: ["", "agents", "Tp3ChatAgent" or kebab-case, randomSessionId]
+      if (parts.length >= 4 && parts[3] !== "chat") {
+        parts[3] = "chat";
+        const newUrl = new URL(request.url);
+        newUrl.pathname = parts.join("/");
+        request = new Request(newUrl.toString(), request);
       }
     }
 

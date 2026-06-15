@@ -19,8 +19,13 @@ npx wrangler dev -c wrangler-tp3studio.jsonc
 
 # Widget — build & publish
 cd packages/widget
-npm run build
+npm version patch        # Bump version (patch/minor/major)
+npm run build            # Build (genera dist/)
 npm publish --access public
+
+# Actualizar widget en sitios cliente
+cd ~/Documents/varsanaAstro && npm update @tp3/chat-widget && npm run build && npx wrangler deploy
+cd ~/Documents/tp3studio && npm update @tp3/chat-widget && npm run deploy
 ```
 
 ## Architecture
