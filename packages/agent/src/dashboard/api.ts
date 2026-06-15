@@ -5,7 +5,7 @@
  */
 
 interface Env {
-  DEEPSEEK_API_KEY: string;
+  AI_GATEWAY_TOKEN: string;
   CLIENT_ID: string;
   TOOLS_URL?: string;
   Tp3ChatAgent: DurableObjectNamespace;

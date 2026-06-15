@@ -20,12 +20,13 @@ import {
 } from "./dashboard/api";
 
 interface Env {
-  DEEPSEEK_API_KEY: string;
+  AI_GATEWAY_TOKEN: string;
   CLIENT_ID: string;
   TOOLS_URL?: string;
   Tp3ChatAgent: DurableObjectNamespace;
 }
 
+const AI_GATEWAY_URL = "https://gateway.ai.cloudflare.com/v1/e3e57fcc48f7a3905b335a21ff5de958/tp3-gateway/compat/chat/completions";
 const DEEPSEEK_TIMEOUT_MS = 25000;
 const TOOL_TIMEOUT_MS = 8000;
 
@@ -100,32 +101,31 @@ function getTools(toolsUrl?: string): any[] | undefined {
  * Non-streaming call to DeepSeek. Used by the HTTP /api/chat fallback.
  */
 async function chatWithDeepSeek(
-  apiKey: string,
+  gatewayToken: string,
+  clientId: string,
   systemPrompt: string,
   messages: { role: string; content: string }[],
 ): Promise<string | null> {
   try {
-    const response = await fetch(
-      "https://api.deepseek.com/v1/chat/completions",
-      {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${apiKey}`,
-        },
-        body: JSON.stringify({
-          model: "deepseek-chat",
-          messages: [
-            { role: "system", content: systemPrompt },
-            ...messages.slice(-20),
-          ],
-          max_tokens: 1024,
-          temperature: 0.7,
-          stream: false,
-        }),
-        signal: AbortSignal.timeout(DEEPSEEK_TIMEOUT_MS),
+    const response = await fetch(AI_GATEWAY_URL, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${gatewayToken}`,
+        "cf-aig-metadata": `{"client":"${clientId}"}`,
       },
-    );
+      body: JSON.stringify({
+        model: "deepseek/deepseek-chat",
+        messages: [
+          { role: "system", content: systemPrompt },
+          ...messages.slice(-20),
+        ],
+        max_tokens: 1024,
+        temperature: 0.7,
+        stream: false,
+      }),
+      signal: AbortSignal.timeout(DEEPSEEK_TIMEOUT_MS),
+    });
     if (!response.ok) return null;
     const result: any = await response.json();
     return result.choices?.[0]?.message?.content || null;
@@ -140,7 +140,8 @@ async function chatWithDeepSeek(
  * Returns the full text, or null on failure.
  */
 async function streamDeepSeek(
-  apiKey: string,
+  gatewayToken: string,
+  clientId: string,
   systemPrompt: string,
   messages: { role: string; content: string | null; tool_calls?: any[]; tool_call_id?: string }[],
   onToken: (delta: string) => void,
@@ -150,7 +151,7 @@ async function streamDeepSeek(
 ): Promise<string | null> {
   try {
     const body: any = {
-      model: "deepseek-chat",
+      model: "deepseek/deepseek-chat",
       messages: [
         { role: "system", content: systemPrompt },
         ...messages.slice(-20),
@@ -161,18 +162,16 @@ async function streamDeepSeek(
     };
     if (tools && tools.length > 0) body.tools = tools;
 
-    const response = await fetch(
-      "https://api.deepseek.com/v1/chat/completions",
-      {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${apiKey}`,
-        },
-        body: JSON.stringify(body),
-        signal: AbortSignal.timeout(DEEPSEEK_TIMEOUT_MS),
+    const response = await fetch(AI_GATEWAY_URL, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${gatewayToken}`,
+        "cf-aig-metadata": `{"client":"${clientId}"}`,
       },
-    );
+      body: JSON.stringify(body),
+      signal: AbortSignal.timeout(DEEPSEEK_TIMEOUT_MS),
+    });
 
     if (!response.ok || !response.body) return null;
 
@@ -254,7 +253,7 @@ async function streamDeepSeek(
       ];
 
       return await streamDeepSeek(
-        apiKey, systemPrompt, newMessages,
+        gatewayToken, clientId, systemPrompt, newMessages,
         onToken, onDone,
         undefined, undefined, // no tools in second pass
       );
@@ -389,7 +388,8 @@ export class Tp3ChatAgent extends Agent<Env> {
         : undefined;
 
       const reply = await streamDeepSeek(
-        this.env.DEEPSEEK_API_KEY,
+        this.env.AI_GATEWAY_TOKEN,
+        clientId,
         systemPrompt,
         history,
         (delta) => {
@@ -547,12 +547,6 @@ export default {
       try {
         const body: any = await request.json();
         const messages = (body.messages || []).slice(-20);
-        const apiKey = env.DEEPSEEK_API_KEY;
-        if (!apiKey)
-          return Response.json(
-            { reply: "Error de configuración." },
-            { status: 500, headers: corsHeaders },
-          );
 
         const clientId = env.CLIENT_ID || "tp3studio";
         const systemPrompt = getSystemPrompt(clientId);
@@ -560,11 +554,15 @@ export default {
         const tools = getTools(toolsUrl);
 
         // Use non-streaming with tools for HTTP fallback
-        const result = await fetch("https://api.deepseek.com/v1/chat/completions", {
+        const result = await fetch(AI_GATEWAY_URL, {
           method: "POST",
-          headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${env.AI_GATEWAY_TOKEN}`,
+            "cf-aig-metadata": `{"client":"${clientId}"}`,
+          },
           body: JSON.stringify({
-            model: "deepseek-chat",
+            model: "deepseek/deepseek-chat",
             messages: [{ role: "system", content: systemPrompt }, ...messages],
             max_tokens: tools && tools.length > 0 ? 2048 : 1024,
             temperature: 0.7,
@@ -592,11 +590,15 @@ export default {
             toolResults.push({ role: "tool", tool_call_id: tc.id, content: toolResult });
           }
 
-          const secondResult = await fetch("https://api.deepseek.com/v1/chat/completions", {
+          const secondResult = await fetch(AI_GATEWAY_URL, {
             method: "POST",
-            headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${env.AI_GATEWAY_TOKEN}`,
+              "cf-aig-metadata": `{"client":"${clientId}"}`,
+            },
             body: JSON.stringify({
-              model: "deepseek-chat",
+              model: "deepseek/deepseek-chat",
               messages: [
                 { role: "system", content: systemPrompt },
                 ...messages,
