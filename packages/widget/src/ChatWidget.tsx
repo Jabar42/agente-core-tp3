@@ -1,3 +1,4 @@
+
 import { useState, useRef, useEffect, useCallback } from "react";
 
 export interface ChatWidgetProps {
@@ -459,11 +460,14 @@ export default function ChatWidget({
               padding: "12px 16px",
               display: "flex",
               flexDirection: "column",
-              justifyContent: "flex-end",
+              // FIX scroll: NO justifyContent flex-end — it breaks overflow scrolling.
+              // The spacer div below pushes messages to the bottom when there are few of them.
               gap: 10,
               fontFamily: "var(--chat-font-body, 'Nunito', sans-serif)",
             }}
           >
+            {/* Spacer that collapses once messages fill the container */}
+            <div style={{ flex: 1, minHeight: 0 }} />
             {/* FIX #8: Use stable message id as key */}
             {messages.map((m) => (
               <div
