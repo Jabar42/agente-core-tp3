@@ -63,7 +63,7 @@ const DEFAULTS = {
 } as const;
 
 // FIX #10: Reduced typewriter delay for a snappier feel
-const TYPEWRITER_MS = 24;
+const TYPEWRITER_MS = 100;
 // FIX #6: Max retries for the send loop
 const MAX_SEND_RETRIES = 15;
 
