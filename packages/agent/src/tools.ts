@@ -15,30 +15,27 @@ export interface ToolDefinition {
 }
 
 export const TOOL_DEFINITIONS: Record<string, ToolDefinition> = {
-  get_events: {
-    description: "Lista los proximos eventos (retiros) disponibles con titulos, fechas, precios y disponibilidad. Usa el parametro slug para obtener el detalle completo de un evento especifico incluyendo la descripcion detallada.",
+  get_collections: {
+    description: "Descubre todas las colecciones de contenido disponibles (ej: events, pasadias, nosotros) con sus campos y endpoints. Usa esto primero para saber que datos estan disponibles antes de consultar una coleccion especifica.",
     parameters: {
       type: "object",
-      properties: {
-        slug: { type: "string", description: "Slug del evento para obtener detalle completo (opcional)" },
-      },
+      properties: {},
     },
-    buildUrl: (args, base) => {
-      const slug = args.slug ? `?slug=${encodeURIComponent(args.slug)}` : "";
-      return `${base}/api/events${slug}`;
-    },
+    buildUrl: (_args, base) => `${base}/api/collections`,
   },
-  get_pasadias: {
-    description: "Lista los pasadias (experiencias de un dia) disponibles con titulos, precios, duracion y categoria. Usa el parametro slug para obtener el detalle completo de un pasadia especifico.",
+  query_collection: {
+    description: "Consulta una coleccion de contenido especifica. Usa el parametro 'collection' con el nombre de la coleccion (ej: 'events', 'pasadias', 'nosotros'). Usa el parametro 'slug' para obtener el detalle completo de un registro especifico (opcional). Antes de usar esta tool, llama a get_collections para saber que colecciones existen.",
     parameters: {
       type: "object",
       properties: {
-        slug: { type: "string", description: "Slug del pasadia para obtener detalle completo (opcional)" },
+        collection: { type: "string", description: "Nombre de la coleccion a consultar (ej: 'events', 'pasadias', 'nosotros')" },
+        slug: { type: "string", description: "Slug del registro para obtener detalle completo (opcional)" },
       },
+      required: ["collection"],
     },
     buildUrl: (args, base) => {
       const slug = args.slug ? `?slug=${encodeURIComponent(args.slug)}` : "";
-      return `${base}/api/pasadias${slug}`;
+      return `${base}/api/${encodeURIComponent(args.collection)}${slug}`;
     },
   },
 };

@@ -319,15 +319,30 @@ export class Tp3ChatAgent extends Agent<Env> {
           }
         : undefined;
 
+      // Strip XML-style tool call markup that DeepSeek may embed in content
+      // so the widget never renders internal tool calling syntax to users.
+      const sanitizeChunk = (text: string): string => {
+        return text
+          .replace(/<function_calls>[\s\S]*?<\/function_calls>/gi, "")
+          .replace(/<tool_call>[\s\S]*?<\/tool_call>/gi, "")
+          .replace(/<\?xml[\s\S]*?\?>/g, "")
+          .replace(/<[^>]+>[\s\S]*?<\/[^>]+>/g, "")
+          .replace(/\b(get_collections|query_collection)\s*\([^)]*\)/g, "")
+          .trim();
+      };
+
       const reply = await streamDeepSeek(
         this.env.AI_GATEWAY_TOKEN,
         clientId,
         systemPrompt,
         history,
         (delta) => {
-          connection.send(
-            JSON.stringify({ type: "chat-chunk", text: delta, done: false }),
-          );
+          const clean = sanitizeChunk(delta);
+          if (clean) {
+            connection.send(
+              JSON.stringify({ type: "chat-chunk", text: clean, done: false }),
+            );
+          }
         },
         (fullText) => {
           // Record assistant message
