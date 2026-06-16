@@ -174,14 +174,14 @@ async function streamDeepSeek(
 
     // Execute tool calls if any
     if (toolCalls.size > 0 && onToolCall) {
-      const toolResults: { role: string; tool_call_id: string; content: string }[] = [];
+      const toolResults: { role: string; name: string; content: string }[] = [];
       const assistantToolCalls: any[] = [];
 
       for (const [, acc] of toolCalls) {
         let args: Record<string, any> = {};
         try { args = JSON.parse(acc.arguments); } catch { args = {}; }
         const result = await onToolCall(acc.name, args);
-        toolResults.push({ role: "tool", tool_call_id: acc.id, content: result });
+        toolResults.push({ role: "function", name: acc.name, content: result });
         assistantToolCalls.push({
           id: acc.id, type: "function",
           function: { name: acc.name, arguments: acc.arguments },
@@ -530,7 +530,7 @@ export default {
           for (const tc of msg.tool_calls) {
             const args = tc.function?.arguments ? JSON.parse(tc.function.arguments) : {};
             const toolResult = await executeToolCall(tc.function.name, args, toolsUrl);
-            toolResults.push({ role: "tool", tool_call_id: tc.id, content: toolResult });
+            toolResults.push({ role: "function", name: tc.function.name, content: toolResult });
           }
 
           const secondResult = await fetch(AI_GATEWAY_URL, {
