@@ -111,11 +111,12 @@ async function streamDeepSeek(
     const decoder = new TextDecoder();
     let fullText = "";
     let buffer = "";
-    // Accumulate tool call deltas by index
+    // Accumulate tool call deltas by index (standard OpenAI format)
     const toolCalls: Map<number, { id: string; name: string; arguments: string }> = new Map();
-    // State machine to strip XML tool call markup that DeepSeek may embed in content.
-    // Must persist across chunks — regex per chunk can't match multi-chunk XML.
-    let insideXML = false;
+    // The AI Gateway may return tool calls as XML embedded in content
+    // instead of using delta.tool_calls. We accumulate raw content here
+    // and parse it for <function_calls> blocks at the end of the stream.
+    let rawContent = "";
 
     while (true) {
       const { done, value } = await reader.read();
@@ -137,7 +138,7 @@ async function streamDeepSeek(
           const delta = parsed.choices?.[0]?.delta;
           if (!delta) continue;
 
-          // Accumulate tool call deltas
+          // Accumulate tool call deltas (standard OpenAI format)
           if (delta.tool_calls) {
             for (const tc of delta.tool_calls) {
               const idx = tc.index ?? 0;
@@ -153,18 +154,9 @@ async function streamDeepSeek(
             continue;
           }
 
-          // Normal content delta — strip any XML markup before sending to widget
+          // Accumulate raw content — we'll parse it for XML tool calls later
           if (delta.content && toolCalls.size === 0) {
-            let clean = "";
-            for (const ch of delta.content) {
-              if (ch === "<") { insideXML = true; continue; }
-              if (ch === ">") { insideXML = false; continue; }
-              if (!insideXML) clean += ch;
-            }
-            if (clean) {
-              fullText += clean;
-              onToken(clean);
-            }
+            rawContent += delta.content;
           }
         } catch {
           // Skip unparseable lines
@@ -172,23 +164,74 @@ async function streamDeepSeek(
       }
     }
 
-    // Execute tool calls if any
+    /**
+     * Parse <function_calls> XML embedded in content (AI Gateway /compat format).
+     * Returns { name, arguments } or null if no tool call is found.
+     */
+    function parseXMLToolCalls(xml: string): { name: string; arguments: Record<string, any> }[] {
+      const results: { name: string; arguments: Record<string, any> }[] = [];
+      const blockRegex = /<function_calls>([\s\S]*?)<\/function_calls>/gi;
+      let blockMatch;
+      while ((blockMatch = blockRegex.exec(xml)) !== null) {
+        const invokeRegex = /<invoke\s+name="([^"]+)"\s*>([\s\S]*?)<\/invoke>/gi;
+        let invokeMatch;
+        while ((invokeMatch = invokeRegex.exec(blockMatch[1])) !== null) {
+          const toolName = invokeMatch[1];
+          const args: Record<string, any> = {};
+          const paramRegex = /<parameter\s+name="([^"]+)"(?:\s+string="true")?\s*>([\s\S]*?)<\/parameter>/gi;
+          let paramMatch;
+          while ((paramMatch = paramRegex.exec(invokeMatch[2])) !== null) {
+            args[paramMatch[1]] = paramMatch[2].trim();
+          }
+          results.push({ name: toolName, arguments: args });
+        }
+      }
+      return results;
+    }
+
+    // Try to parse tool calls from XML content (AI Gateway /compat format)
+    const xmlToolCalls = parseXMLToolCalls(rawContent);
+
+    if (xmlToolCalls.length > 0 && onToolCall) {
+      // Legacy-format tool results (no tool_call_id available from XML)
+      const legacyToolResults: { role: string; content: string }[] = [];
+      for (const tc of xmlToolCalls) {
+        const result = await onToolCall(tc.name, tc.arguments);
+        legacyToolResults.push({ role: "user", content: `Resultado de ${tc.name}(${JSON.stringify(tc.arguments)}): ${result}` });
+      }
+
+      // Strip the XML from assistant content so the model sees clean text + tool results
+      const cleanAssistantContent = rawContent.replace(/<function_calls>[\s\S]*?<\/function_calls>/gi, "").trim();
+
+      const newMessages = [
+        ...messages.slice(-20),
+        { role: "assistant", content: cleanAssistantContent },
+        ...legacyToolResults,
+      ];
+
+      return await streamDeepSeek(
+        gatewayToken, clientId, systemPrompt, newMessages,
+        onToken, onDone,
+        undefined, undefined, // no tools in second pass
+      );
+    }
+
+    // Execute tool calls from standard delta.tool_calls if any
     if (toolCalls.size > 0 && onToolCall) {
-      const toolResults: { role: string; name: string; content: string }[] = [];
+      const toolResults: { role: string; tool_call_id: string; content: string }[] = [];
       const assistantToolCalls: any[] = [];
 
       for (const [, acc] of toolCalls) {
         let args: Record<string, any> = {};
         try { args = JSON.parse(acc.arguments); } catch { args = {}; }
         const result = await onToolCall(acc.name, args);
-        toolResults.push({ role: "function", name: acc.name, content: result });
+        toolResults.push({ role: "tool", tool_call_id: acc.id, content: result });
         assistantToolCalls.push({
           id: acc.id, type: "function",
           function: { name: acc.name, arguments: acc.arguments },
         });
       }
 
-      // Second call without tools to get the final response
       const newMessages = [
         ...messages.slice(-20),
         { role: "assistant", content: null, tool_calls: assistantToolCalls },
@@ -200,6 +243,17 @@ async function streamDeepSeek(
         onToken, onDone,
         undefined, undefined, // no tools in second pass
       );
+    }
+
+    // No tool calls — send the clean content (XML stripped for display)
+    if (rawContent) {
+      const cleanText = rawContent.replace(/<function_calls>[\s\S]*?<\/function_calls>/gi, "").trim();
+      if (cleanText) {
+        fullText = cleanText;
+        onToken(cleanText);
+        onDone(cleanText);
+        return cleanText;
+      }
     }
 
     if (fullText) {
@@ -530,7 +584,7 @@ export default {
           for (const tc of msg.tool_calls) {
             const args = tc.function?.arguments ? JSON.parse(tc.function.arguments) : {};
             const toolResult = await executeToolCall(tc.function.name, args, toolsUrl);
-            toolResults.push({ role: "function", name: tc.function.name, content: toolResult });
+            toolResults.push({ role: "tool", tool_call_id: tc.id, content: toolResult });
           }
 
           const secondResult = await fetch(AI_GATEWAY_URL, {
