@@ -113,6 +113,9 @@ async function streamDeepSeek(
     let buffer = "";
     // Accumulate tool call deltas by index
     const toolCalls: Map<number, { id: string; name: string; arguments: string }> = new Map();
+    // State machine to strip XML tool call markup that DeepSeek may embed in content.
+    // Must persist across chunks — regex per chunk can't match multi-chunk XML.
+    let insideXML = false;
 
     while (true) {
       const { done, value } = await reader.read();
@@ -150,10 +153,18 @@ async function streamDeepSeek(
             continue;
           }
 
-          // Normal content delta
+          // Normal content delta — strip any XML markup before sending to widget
           if (delta.content && toolCalls.size === 0) {
-            fullText += delta.content;
-            onToken(delta.content);
+            let clean = "";
+            for (const ch of delta.content) {
+              if (ch === "<") { insideXML = true; continue; }
+              if (ch === ">") { insideXML = false; continue; }
+              if (!insideXML) clean += ch;
+            }
+            if (clean) {
+              fullText += clean;
+              onToken(clean);
+            }
           }
         } catch {
           // Skip unparseable lines
@@ -319,30 +330,15 @@ export class Tp3ChatAgent extends Agent<Env> {
           }
         : undefined;
 
-      // Strip XML-style tool call markup that DeepSeek may embed in content
-      // so the widget never renders internal tool calling syntax to users.
-      const sanitizeChunk = (text: string): string => {
-        return text
-          .replace(/<function_calls>[\s\S]*?<\/function_calls>/gi, "")
-          .replace(/<tool_call>[\s\S]*?<\/tool_call>/gi, "")
-          .replace(/<\?xml[\s\S]*?\?>/g, "")
-          .replace(/<[^>]+>[\s\S]*?<\/[^>]+>/g, "")
-          .replace(/\b(get_collections|query_collection)\s*\([^)]*\)/g, "")
-          .trim();
-      };
-
       const reply = await streamDeepSeek(
         this.env.AI_GATEWAY_TOKEN,
         clientId,
         systemPrompt,
         history,
         (delta) => {
-          const clean = sanitizeChunk(delta);
-          if (clean) {
-            connection.send(
-              JSON.stringify({ type: "chat-chunk", text: clean, done: false }),
-            );
-          }
+          connection.send(
+            JSON.stringify({ type: "chat-chunk", text: delta, done: false }),
+          );
         },
         (fullText) => {
           // Record assistant message
