@@ -113,10 +113,12 @@ async function streamDeepSeek(
     let buffer = "";
     // Accumulate tool call deltas by index (standard OpenAI format)
     const toolCalls: Map<number, { id: string; name: string; arguments: string }> = new Map();
-    // The AI Gateway may return tool calls as XML embedded in content
-    // instead of using delta.tool_calls. We accumulate raw content here
-    // and parse it for <function_calls> blocks at the end of the stream.
-    let rawContent = "";
+    // The AI Gateway may return tool calls as XML embedded in content.
+    // Once we detect <function_calls> we suppress all output and buffer
+    // the raw content for parsing at the end of the stream.
+    let suppressed = false;
+    let pendingBuffer = "";  // holds recent content that might start an XML tag
+    let rawContent = "";     // only populated once suppressed
 
     while (true) {
       const { done, value } = await reader.read();
@@ -154,9 +156,44 @@ async function streamDeepSeek(
             continue;
           }
 
-          // Accumulate raw content — we'll parse it for XML tool calls later
-          if (delta.content && toolCalls.size === 0) {
+          if (!delta.content || toolCalls.size > 0) continue;
+
+          if (suppressed) {
+            // Already suppressed — accumulate for tool call parsing
             rawContent += delta.content;
+          } else {
+            pendingBuffer += delta.content;
+
+            const xmlIndex = pendingBuffer.indexOf("<function_calls>");
+            if (xmlIndex >= 0) {
+              // Tool call XML detected. Send the clean text before it.
+              const before = pendingBuffer.slice(0, xmlIndex).trim();
+              if (before) {
+                fullText += before;
+                onToken(before);
+              }
+              // Everything from <function_calls> onward is suppressed
+              rawContent = pendingBuffer.slice(xmlIndex);
+              pendingBuffer = "";
+              suppressed = true;
+            } else {
+              // Send everything safe from pending buffer.
+              // Keep only the part that might start a tag (trailing '<' or '<f', etc.)
+              const lastBracket = pendingBuffer.lastIndexOf("<");
+              if (lastBracket === -1) {
+                // No '<' at all — completely safe
+                fullText += pendingBuffer;
+                onToken(pendingBuffer);
+                pendingBuffer = "";
+              } else if (lastBracket > 0) {
+                // '<' is not at the start — send everything before it
+                const safe = pendingBuffer.slice(0, lastBracket);
+                fullText += safe;
+                onToken(safe);
+                pendingBuffer = pendingBuffer.slice(lastBracket);
+              }
+              // If '<' is at position 0, hold the entire buffer (might be <function_calls>)
+            }
           }
         } catch {
           // Skip unparseable lines
@@ -164,9 +201,14 @@ async function streamDeepSeek(
       }
     }
 
+    // Flush pending buffer if still clean (no XML detected)
+    if (!suppressed && pendingBuffer) {
+      fullText += pendingBuffer;
+      onToken(pendingBuffer);
+    }
+
     /**
      * Parse <function_calls> XML embedded in content (AI Gateway /compat format).
-     * Returns { name, arguments } or null if no tool call is found.
      */
     function parseXMLToolCalls(xml: string): { name: string; arguments: Record<string, any> }[] {
       const results: { name: string; arguments: Record<string, any> }[] = [];
@@ -189,31 +231,36 @@ async function streamDeepSeek(
       return results;
     }
 
-    // Try to parse tool calls from XML content (AI Gateway /compat format)
-    const xmlToolCalls = parseXMLToolCalls(rawContent);
+    // Execute tool calls parsed from XML content
+    if (suppressed && rawContent && onToolCall) {
+      const xmlToolCalls = parseXMLToolCalls(rawContent);
 
-    if (xmlToolCalls.length > 0 && onToolCall) {
-      // Legacy-format tool results (no tool_call_id available from XML)
-      const legacyToolResults: { role: string; content: string }[] = [];
-      for (const tc of xmlToolCalls) {
-        const result = await onToolCall(tc.name, tc.arguments);
-        legacyToolResults.push({ role: "user", content: `Resultado de ${tc.name}(${JSON.stringify(tc.arguments)}): ${result}` });
+      if (xmlToolCalls.length > 0) {
+        const toolResults: { role: string; tool_call_id: string; content: string }[] = [];
+        const assistantToolCalls: any[] = [];
+
+        for (const tc of xmlToolCalls) {
+          const result = await onToolCall(tc.name, tc.arguments);
+          const id = crypto.randomUUID();
+          toolResults.push({ role: "tool", tool_call_id: id, content: result });
+          assistantToolCalls.push({
+            id, type: "function",
+            function: { name: tc.name, arguments: JSON.stringify(tc.arguments) },
+          });
+        }
+
+        const newMessages = [
+          ...messages.slice(-20),
+          { role: "assistant", content: null, tool_calls: assistantToolCalls },
+          ...toolResults,
+        ];
+
+        return await streamDeepSeek(
+          gatewayToken, clientId, systemPrompt, newMessages,
+          onToken, onDone,
+          undefined, undefined, // no tools in second pass
+        );
       }
-
-      // Strip the XML from assistant content so the model sees clean text + tool results
-      const cleanAssistantContent = rawContent.replace(/<function_calls>[\s\S]*?<\/function_calls>/gi, "").trim();
-
-      const newMessages = [
-        ...messages.slice(-20),
-        { role: "assistant", content: cleanAssistantContent },
-        ...legacyToolResults,
-      ];
-
-      return await streamDeepSeek(
-        gatewayToken, clientId, systemPrompt, newMessages,
-        onToken, onDone,
-        undefined, undefined, // no tools in second pass
-      );
     }
 
     // Execute tool calls from standard delta.tool_calls if any
@@ -245,17 +292,7 @@ async function streamDeepSeek(
       );
     }
 
-    // No tool calls — send the clean content (XML stripped for display)
-    if (rawContent) {
-      const cleanText = rawContent.replace(/<function_calls>[\s\S]*?<\/function_calls>/gi, "").trim();
-      if (cleanText) {
-        fullText = cleanText;
-        onToken(cleanText);
-        onDone(cleanText);
-        return cleanText;
-      }
-    }
-
+    // No tool calls — finalize
     if (fullText) {
       onDone(fullText);
       return fullText;
