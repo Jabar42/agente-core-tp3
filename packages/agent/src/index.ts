@@ -113,12 +113,11 @@ async function streamDeepSeek(
     let buffer = "";
     // Accumulate tool call deltas by index (standard OpenAI format)
     const toolCalls: Map<number, { id: string; name: string; arguments: string }> = new Map();
-    // The AI Gateway may return tool calls as XML embedded in content.
-    // Once we detect <function_calls> we suppress all output and buffer
-    // the raw content for parsing at the end of the stream.
-    let suppressed = false;
-    let pendingBuffer = "";  // holds recent content that might start an XML tag
-    let rawContent = "";     // only populated once suppressed
+    // The AI Gateway returns tool calls as XML inside content.
+    // We accumulate everything in rawContent and parse it after the stream ends.
+    // NOTHING is sent to the widget during the first pass — we only send
+    // either the second-pass result (after tool execution) or the cleaned text.
+    let rawContent = "";
 
     while (true) {
       const { done, value } = await reader.read();
@@ -156,55 +155,14 @@ async function streamDeepSeek(
             continue;
           }
 
-          if (!delta.content || toolCalls.size > 0) continue;
-
-          if (suppressed) {
-            // Already suppressed — accumulate for tool call parsing
+          // Buffer all content — we'll parse it for XML tool calls at the end
+          if (delta.content && toolCalls.size === 0) {
             rawContent += delta.content;
-          } else {
-            pendingBuffer += delta.content;
-
-            const xmlIndex = pendingBuffer.indexOf("<function_calls>");
-            if (xmlIndex >= 0) {
-              // Tool call XML detected. Send the clean text before it.
-              const before = pendingBuffer.slice(0, xmlIndex).trim();
-              if (before) {
-                fullText += before;
-                onToken(before);
-              }
-              // Everything from <function_calls> onward is suppressed
-              rawContent = pendingBuffer.slice(xmlIndex);
-              pendingBuffer = "";
-              suppressed = true;
-            } else {
-              // Send everything safe from pending buffer.
-              // Keep only the part that might start a tag (trailing '<' or '<f', etc.)
-              const lastBracket = pendingBuffer.lastIndexOf("<");
-              if (lastBracket === -1) {
-                // No '<' at all — completely safe
-                fullText += pendingBuffer;
-                onToken(pendingBuffer);
-                pendingBuffer = "";
-              } else if (lastBracket > 0) {
-                // '<' is not at the start — send everything before it
-                const safe = pendingBuffer.slice(0, lastBracket);
-                fullText += safe;
-                onToken(safe);
-                pendingBuffer = pendingBuffer.slice(lastBracket);
-              }
-              // If '<' is at position 0, hold the entire buffer (might be <function_calls>)
-            }
           }
         } catch {
           // Skip unparseable lines
         }
       }
-    }
-
-    // Flush pending buffer if still clean (no XML detected)
-    if (!suppressed && pendingBuffer) {
-      fullText += pendingBuffer;
-      onToken(pendingBuffer);
     }
 
     /**
@@ -231,36 +189,33 @@ async function streamDeepSeek(
       return results;
     }
 
-    // Execute tool calls parsed from XML content
-    if (suppressed && rawContent && onToolCall) {
-      const xmlToolCalls = parseXMLToolCalls(rawContent);
+    // Try to parse and execute tool calls from XML content
+    const xmlToolCalls = parseXMLToolCalls(rawContent);
+    if (xmlToolCalls.length > 0 && onToolCall) {
+      const toolResults: { role: string; tool_call_id: string; content: string }[] = [];
+      const assistantToolCalls: any[] = [];
 
-      if (xmlToolCalls.length > 0) {
-        const toolResults: { role: string; tool_call_id: string; content: string }[] = [];
-        const assistantToolCalls: any[] = [];
-
-        for (const tc of xmlToolCalls) {
-          const result = await onToolCall(tc.name, tc.arguments);
-          const id = crypto.randomUUID();
-          toolResults.push({ role: "tool", tool_call_id: id, content: result });
-          assistantToolCalls.push({
-            id, type: "function",
-            function: { name: tc.name, arguments: JSON.stringify(tc.arguments) },
-          });
-        }
-
-        const newMessages = [
-          ...messages.slice(-20),
-          { role: "assistant", content: null, tool_calls: assistantToolCalls },
-          ...toolResults,
-        ];
-
-        return await streamDeepSeek(
-          gatewayToken, clientId, systemPrompt, newMessages,
-          onToken, onDone,
-          undefined, undefined, // no tools in second pass
-        );
+      for (const tc of xmlToolCalls) {
+        const result = await onToolCall(tc.name, tc.arguments);
+        const id = crypto.randomUUID();
+        toolResults.push({ role: "tool", tool_call_id: id, content: result });
+        assistantToolCalls.push({
+          id, type: "function",
+          function: { name: tc.name, arguments: JSON.stringify(tc.arguments) },
+        });
       }
+
+      const newMessages = [
+        ...messages.slice(-20),
+        { role: "assistant", content: null, tool_calls: assistantToolCalls },
+        ...toolResults,
+      ];
+
+      return await streamDeepSeek(
+        gatewayToken, clientId, systemPrompt, newMessages,
+        onToken, onDone,
+        undefined, undefined, // no tools in second pass
+      );
     }
 
     // Execute tool calls from standard delta.tool_calls if any
@@ -292,7 +247,15 @@ async function streamDeepSeek(
       );
     }
 
-    // No tool calls — finalize
+    // No tool calls — strip any XML and send clean text
+    const clean = rawContent.replace(/<function_calls>[\s\S]*?<\/function_calls>/gi, "").trim();
+    if (clean) {
+      fullText = clean;
+      onToken(clean);
+      onDone(clean);
+      return clean;
+    }
+
     if (fullText) {
       onDone(fullText);
       return fullText;
