@@ -166,19 +166,25 @@ async function streamDeepSeek(
     }
 
     /**
-     * Parse <function_calls> XML embedded in content (AI Gateway /compat format).
+     * Parse XML/DSML tool call blocks embedded in content by the AI Gateway.
+     * Handles both standard Anthropic-style and DeepSeek DSML formats:
+     *   <function_calls> / <DSML|function_calls>
+     *   <invoke name="..."> / <DSML|invoke name="...">
+     *   <parameter name="...">value</parameter> / <DSML|parameter name="...">value</DSML|parameter>
      */
     function parseXMLToolCalls(xml: string): { name: string; arguments: Record<string, any> }[] {
       const results: { name: string; arguments: Record<string, any> }[] = [];
-      const blockRegex = /<function_calls>([\s\S]*?)<\/function_calls>/gi;
+
+      // Match both standard and DSML-prefixed tags
+      const blockRegex = /<(?:DSML\|)?function_calls>([\s\S]*?)<\/(?:DSML\|)?function_calls>/gi;
       let blockMatch;
       while ((blockMatch = blockRegex.exec(xml)) !== null) {
-        const invokeRegex = /<invoke\s+name="([^"]+)"\s*>([\s\S]*?)<\/invoke>/gi;
+        const invokeRegex = /<(?:DSML\|)?invoke\s+name="([^"]+)"\s*>([\s\S]*?)<\/(?:DSML\|)?invoke>/gi;
         let invokeMatch;
         while ((invokeMatch = invokeRegex.exec(blockMatch[1])) !== null) {
           const toolName = invokeMatch[1];
           const args: Record<string, any> = {};
-          const paramRegex = /<parameter\s+name="([^"]+)"(?:\s+string="true")?\s*>([\s\S]*?)<\/parameter>/gi;
+          const paramRegex = /<(?:DSML\|)?parameter\s+name="([^"]+)"(?:\s+string="true")?\s*>([\s\S]*?)<\/(?:DSML\|)?parameter>/gi;
           let paramMatch;
           while ((paramMatch = paramRegex.exec(invokeMatch[2])) !== null) {
             args[paramMatch[1]] = paramMatch[2].trim();
@@ -187,6 +193,16 @@ async function streamDeepSeek(
         }
       }
       return results;
+    }
+
+    /**
+     * Strip any tool call XML/DSML blocks from text before showing to users.
+     */
+    function stripToolCallMarkup(text: string): string {
+      return text
+        .replace(/<(?:DSML\|)?function_calls>[\s\S]*?<\/(?:DSML\|)?function_calls>/gi, "")
+        .replace(/<(?:DSML\|)?\/?(?:invoke|parameter|function_calls)[^>]*>/gi, "")
+        .trim();
     }
 
     // Try to parse and execute tool calls from XML content
