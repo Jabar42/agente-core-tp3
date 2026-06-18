@@ -31,7 +31,7 @@ function error(msg: string, status = 400): Response {
 
 function getStub(env: Env): any {
   // Use a fixed DO name so all chat sessions + admin queries hit the same DO instance
-  const doId = env.Tp3ChatAgent.idFromName("chat");
+  const doId = env.Tp3ChatAgent.idFromName("dashboard");
   return env.Tp3ChatAgent.get(doId);
 }
 

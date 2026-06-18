@@ -71,11 +71,21 @@ export default function ChatWidget({
   const messagesEnd = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
-  // Connect to Think agent via useAgent + useAgentChat.
-  // Single DO instance ("chat") handles all users — Think isolates sessions internally.
+  // Unique session per browser — keeps conversations isolated.
+  // Uses localStorage to survive page reloads within the same browser.
+  const [sessionId] = useState(() => {
+    if (typeof window === "undefined") return "ssr";
+    const key = `chat-session-${agentName}`;
+    const stored = localStorage.getItem(key);
+    if (stored) return stored;
+    const id = crypto.randomUUID();
+    localStorage.setItem(key, id);
+    return id;
+  });
+
   const agent = useAgent({
     agent: agentName,
-    name: "chat",
+    name: sessionId,
     host: agentHost,
   });
 
