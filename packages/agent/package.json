@@ -7,10 +7,15 @@
     "deploy:tp3studio": "wrangler deploy -c wrangler-tp3studio.jsonc"
   },
   "dependencies": {
-    "agents": "^0.15.0"
+    "@ai-sdk/openai": "^3.0.73",
+    "@cloudflare/think": "^0.9.1",
+    "agents": "^0.16.1",
+    "ai": "^6.0.207",
+    "workers-ai-provider": "^3.2.0",
+    "zod": "^4.4.3"
   },
   "devDependencies": {
-    "wrangler": "^4.97.0",
-    "@cloudflare/workers-types": "^4.20260611.0"
+    "@cloudflare/workers-types": "^4.20260611.0",
+    "wrangler": "^4.97.0"
   }
 }

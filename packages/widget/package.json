@@ -1,6 +1,6 @@
 {
   "name": "@tp3/chat-widget",
-  "version": "0.1.18",
+  "version": "0.1.19",
   "main": "dist/ChatWidget.js",
   "module": "dist/ChatWidget.mjs",
   "types": "dist/ChatWidget.d.ts",
@@ -21,5 +21,9 @@
   },
   "peerDependencies": {
     "react": ">=18.0.0"
+  },
+  "dependencies": {
+    "@cloudflare/ai-chat": "^0.8.6",
+    "agents": "^0.16.1"
   }
 }
