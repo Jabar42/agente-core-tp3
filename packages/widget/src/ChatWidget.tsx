@@ -71,8 +71,10 @@ export default function ChatWidget({
   const messagesEnd = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
-  // Unique session per browser — prevents sharing conversation state across devices
+  // Unique session per browser — prevents sharing conversation state across devices.
+  // Guard with typeof window: SSR (Astro on Workers) has no localStorage/crypto.
   const [sessionId] = useState(() => {
+    if (typeof window === "undefined") return "ssr";
     const stored = localStorage.getItem("chat-session-id");
     if (stored) return stored;
     const id = crypto.randomUUID();
