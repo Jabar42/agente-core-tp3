@@ -10,6 +10,9 @@
     "CLIENT_ID": "varsana",
     "TOOLS_URL": "https://varsana-co.iaforchange.workers.dev"
   },
+  "ai": {
+    "binding": "AI"
+  },
   "durable_objects": {
     "bindings": [
       { "name": "Tp3ChatAgent", "class_name": "Tp3ChatAgent" }

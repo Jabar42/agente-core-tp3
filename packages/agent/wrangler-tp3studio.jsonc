@@ -9,6 +9,9 @@
   "vars": {
     "CLIENT_ID": "tp3studio"
   },
+  "ai": {
+    "binding": "AI"
+  },
   "durable_objects": {
     "bindings": [
       { "name": "Tp3ChatAgent", "class_name": "Tp3ChatAgent" }
