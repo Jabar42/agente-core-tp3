@@ -71,9 +71,19 @@ export default function ChatWidget({
   const messagesEnd = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
+  // Unique session per browser — prevents sharing conversation state across devices
+  const [sessionId] = useState(() => {
+    const stored = localStorage.getItem("chat-session-id");
+    if (stored) return stored;
+    const id = crypto.randomUUID();
+    localStorage.setItem("chat-session-id", id);
+    return id;
+  });
+
   // Connect to Think agent via useAgent + useAgentChat
   const agent = useAgent({
     agent: agentName,
+    name: sessionId,
     host: agentHost,
   });
 
