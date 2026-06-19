@@ -77,9 +77,9 @@ export class Tp3ChatAgent extends Think<Env> {
         content TEXT NOT NULL, updated_at TEXT DEFAULT (datetime('now')),
         PRIMARY KEY (client_id, fragment)
       )`;
-      // Fetch overrides from the shared dashboard DO and mirror locally
+      // Fetch overrides from the shared "chat" DO and mirror locally
       const ns = this.env.Tp3ChatAgent;
-      const dashStub = ns.get(ns.idFromName("dashboard"));
+      const dashStub = ns.get(ns.idFromName("chat"));
       const result = await (dashStub as any).adminGetPrompts(this.env.CLIENT_ID || "tp3studio");
       if (result?.prompts) {
         for (const p of result.prompts) {
