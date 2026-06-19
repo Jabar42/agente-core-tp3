@@ -50,6 +50,13 @@ async function fetchToolData(toolsUrl: string | undefined, name: string, args: R
 }
 
 export class Tp3ChatAgent extends Think<Env> {
+  workspaceBash = false;
+
+  /** Only expose our custom API tools — block workspace, MCP, browser */
+  beforeTurn(_ctx: any) {
+    return { activeTools: ["get_collections", "query_collection"] };
+  }
+
   getModel() {
     const provider = createOpenAI({
       baseURL: "https://gateway.ai.cloudflare.com/v1/e3e57fcc48f7a3905b335a21ff5de958/tp3-gateway/compat",
