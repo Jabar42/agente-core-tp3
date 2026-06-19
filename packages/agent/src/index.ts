@@ -64,7 +64,34 @@ export class Tp3ChatAgent extends Think<Env> {
   }
 
   getSystemPrompt(): string {
-    return getSystemPrompt(this.env.CLIENT_ID || "tp3studio", undefined);
+    return getSystemPrompt(this.env.CLIENT_ID || "tp3studio", this.sql);
+  }
+
+  /** Sync runtime prompt overrides from the shared dashboard DO on session start. */
+  async configureSession(session: any) {
+    const configured = await super.configureSession?.(session) || session;
+    try {
+      // Ensure the local table exists (first connection creates it)
+      this.sql`CREATE TABLE IF NOT EXISTS runtime_prompts (
+        client_id TEXT NOT NULL, fragment TEXT NOT NULL CHECK(fragment IN ('SOUL','SKILLS','RULES','CONTEXT')),
+        content TEXT NOT NULL, updated_at TEXT DEFAULT (datetime('now')),
+        PRIMARY KEY (client_id, fragment)
+      )`;
+      // Fetch overrides from the shared dashboard DO and mirror locally
+      const ns = this.env.Tp3ChatAgent;
+      const dashStub = ns.get(ns.idFromName("dashboard"));
+      const result = await (dashStub as any).adminGetPrompts(this.env.CLIENT_ID || "tp3studio");
+      if (result?.prompts) {
+        for (const p of result.prompts) {
+          if (p.hasOverride) {
+            this.sql`INSERT INTO runtime_prompts (client_id, fragment, content, updated_at)
+              VALUES (${this.env.CLIENT_ID || "tp3studio"}, ${p.fragment}, ${p.content}, datetime('now'))
+              ON CONFLICT (client_id, fragment) DO UPDATE SET content = ${p.content}, updated_at = datetime('now')`;
+          }
+        }
+      }
+    } catch {} // dashboard DO may not exist yet — use compiled defaults
+    return configured;
   }
 
   getTools() {
@@ -94,13 +121,16 @@ export class Tp3ChatAgent extends Think<Env> {
     return super.onConnect?.(connection, ctx);
   }
 
-  async adminGetConnections() {
-    return [...this.getConnections()].length;
-  }
+  // ─── Dashboard admin RPC methods ───
 
-  async adminDebugConns() {
-    return this.sql`SELECT * FROM _debug_conn ORDER BY ts DESC LIMIT 10` as any[];
-  }
+  async adminGetConnections() { return [...this.getConnections()].length; }
+  async adminGetConversation(conversationId: string) { return { messages: this.sql`SELECT role, content, created_at FROM messages WHERE conversation_id = ${conversationId} ORDER BY created_at ASC` as any[] }; }
+  async adminGetConversations(limit: number, offset: number) { return { conversations: this.sql`SELECT id, client_id, created_at, updated_at, message_count, last_message FROM conversations ORDER BY updated_at DESC LIMIT ${limit} OFFSET ${offset}` as any[] }; }
+  async adminGetStats(clientId: string) { const t = new Date().toISOString().slice(0, 10); const row = (this.sql`SELECT messages, tool_calls, tool_errors FROM daily_metrics WHERE date = ${t} AND client_id = ${clientId}` as any[])[0]; return { today: row || { messages: 0, tool_calls: 0, tool_errors: 0 }, series: this.sql`SELECT date, messages, tool_calls, tool_errors FROM daily_metrics WHERE client_id = ${clientId} ORDER BY date DESC LIMIT 30` as any[], connections: [...this.getConnections()].length }; }
+  async adminGetPrompts(clientId: string) { const rows = this.sql`SELECT fragment, content FROM runtime_prompts WHERE client_id = ${clientId}` as any[]; const defaults = DEFAULTS[clientId] ?? DEFAULTS["tp3studio"]; const fragments = ["SOUL", "SKILLS", "RULES", "CONTEXT"]; const ov: Record<string, string> = {}; for (const r of rows) { if (r.content?.trim()) ov[r.fragment] = r.content; } return { prompts: fragments.map((f) => ({ fragment: f, content: ov[f] !== undefined ? ov[f] : (defaults[f] || ""), hasOverride: ov[f] !== undefined })) }; }
+  async adminSavePrompt(clientId: string, fragment: string, content: string) { if (!content?.trim()) { this.sql`DELETE FROM runtime_prompts WHERE client_id = ${clientId} AND fragment = ${fragment}`; } else { this.sql`INSERT INTO runtime_prompts (client_id, fragment, content, updated_at) VALUES (${clientId}, ${fragment}, ${content}, datetime('now')) ON CONFLICT (client_id, fragment) DO UPDATE SET content = ${content}, updated_at = datetime('now')`; } }
+  async adminDebugConns() { return this.sql`SELECT * FROM _debug_conn ORDER BY ts DESC LIMIT 10` as any[]; }
+
 }
 
 const corsHeaders = { "Access-Control-Allow-Origin": "*", "Access-Control-Allow-Methods": "GET, POST, OPTIONS", "Access-Control-Allow-Headers": "*", "Access-Control-Max-Age": "86400" };
