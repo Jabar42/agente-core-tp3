@@ -2,10 +2,9 @@
 
 import { Think } from "@cloudflare/think";
 import { createOpenAI } from "@ai-sdk/openai";
-import { tool, simulateStreamingMiddleware, wrapLanguageModel } from "ai";
-import { z } from "zod";
 import { routeAgentRequest } from "agents";
 import { getSystemPrompt, DEFAULTS } from "./prompts";
+import { buildTools } from "./tools";
 import { overviewPage } from "./dashboard/overview";
 import { conversationsPage } from "./dashboard/conversations";
 import { promptsPage } from "./dashboard/prompts";
@@ -27,27 +26,6 @@ interface Env {
 }
 
 const DEEPSEEK_MODEL = "deepseek/deepseek-chat";
-const TOOL_TIMEOUT_MS = 8000;
-
-async function fetchToolData(toolsUrl: string | undefined, name: string, args: Record<string, any>): Promise<string> {
-  if (!toolsUrl) return JSON.stringify({ error: "Tools not configured" });
-  try {
-    let url: string;
-    if (name === "get_collections") {
-      url = `${toolsUrl}/api/collections`;
-    } else if (name === "query_collection") {
-      const slug = args.slug ? `?slug=${encodeURIComponent(args.slug)}` : "";
-      url = `${toolsUrl}/api/${encodeURIComponent(args.collection)}${slug}`;
-    } else {
-      return JSON.stringify({ error: `Unknown tool: ${name}` });
-    }
-    const res = await fetch(url, { signal: AbortSignal.timeout(TOOL_TIMEOUT_MS) });
-    if (!res.ok) return JSON.stringify({ error: `Status ${res.status}` });
-    return await res.text();
-  } catch (err: any) {
-    return JSON.stringify({ error: err.message || "Tool failed" });
-  }
-}
 
 export class Tp3ChatAgent extends Think<Env> {
   workspaceBash = false;
@@ -102,22 +80,7 @@ export class Tp3ChatAgent extends Think<Env> {
   }
 
   getTools() {
-    const toolsUrl = this.env.TOOLS_URL;
-    return {
-      get_collections: tool({
-        description: "Descubre todas las colecciones de contenido disponibles (events, pasadias, nosotros) con sus campos y endpoints.",
-        inputSchema: z.object({}),
-        execute: async () => fetchToolData(toolsUrl, "get_collections", {}),
-      }),
-      query_collection: tool({
-        description: "Consulta una coleccion. Usa 'collection' (nombre) y opcionalmente 'slug' para detalle.",
-        inputSchema: z.object({
-          collection: z.string().describe("Nombre de la coleccion"),
-          slug: z.string().optional().describe("Slug para detalle"),
-        }),
-        execute: async (args: any) => fetchToolData(toolsUrl, "query_collection", args),
-      }),
-    };
+    return buildTools(this.env.TOOLS_URL);
   }
 
   async onConnect(connection: any, ctx: any) {
