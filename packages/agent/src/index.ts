@@ -84,10 +84,6 @@ export class Tp3ChatAgent extends Think<Env> {
   }
 
   async onConnect(connection: any, ctx: any) {
-    try {
-      this.sql`CREATE TABLE IF NOT EXISTS _debug_conn (ts TEXT DEFAULT (datetime('now')), id TEXT)`;
-      this.sql`INSERT INTO _debug_conn (id) VALUES (${connection?.id || "no-id"})`;
-    } catch {}
     return super.onConnect?.(connection, ctx);
   }
 
@@ -99,7 +95,6 @@ export class Tp3ChatAgent extends Think<Env> {
   async adminGetStats(clientId: string) { const t = new Date().toISOString().slice(0, 10); const row = (this.sql`SELECT messages, tool_calls, tool_errors FROM daily_metrics WHERE date = ${t} AND client_id = ${clientId}` as any[])[0]; return { today: row || { messages: 0, tool_calls: 0, tool_errors: 0 }, series: this.sql`SELECT date, messages, tool_calls, tool_errors FROM daily_metrics WHERE client_id = ${clientId} ORDER BY date DESC LIMIT 30` as any[], connections: [...this.getConnections()].length }; }
   async adminGetPrompts(clientId: string) { const rows = this.sql`SELECT fragment, content FROM runtime_prompts WHERE client_id = ${clientId}` as any[]; const defaults = DEFAULTS[clientId] ?? DEFAULTS["tp3studio"]; const fragments = ["SOUL", "SKILLS", "RULES", "CONTEXT"]; const ov: Record<string, string> = {}; for (const r of rows) { if (r.content?.trim()) ov[r.fragment] = r.content; } return { prompts: fragments.map((f) => ({ fragment: f, content: ov[f] !== undefined ? ov[f] : (defaults[f] || ""), hasOverride: ov[f] !== undefined })) }; }
   async adminSavePrompt(clientId: string, fragment: string, content: string) { if (!content?.trim()) { this.sql`DELETE FROM runtime_prompts WHERE client_id = ${clientId} AND fragment = ${fragment}`; } else { this.sql`INSERT INTO runtime_prompts (client_id, fragment, content, updated_at) VALUES (${clientId}, ${fragment}, ${content}, datetime('now')) ON CONFLICT (client_id, fragment) DO UPDATE SET content = ${content}, updated_at = datetime('now')`; } }
-  async adminDebugConns() { return this.sql`SELECT * FROM _debug_conn ORDER BY ts DESC LIMIT 10` as any[]; }
 
 }
 
@@ -148,15 +143,6 @@ export default {
         text += chunk?.choices?.[0]?.delta?.content || chunk?.response || "";
       }
       return Response.json({ streamed: text || "empty" }, { headers: corsHeaders });
-    }
-    if (url.pathname === "/debug-conns") {
-      const instance = url.searchParams.get("instance") || "default";
-      const ns = env.Tp3ChatAgent;
-      const stub = ns.get(ns.idFromName(instance));
-      try {
-        const rows = await (stub as any).adminDebugConns();
-        return Response.json({ instance, rows }, { headers: corsHeaders });
-      } catch (e: any) { return Response.json({ error: e.message }, { status: 500, headers: corsHeaders }); }
     }
     if (url.pathname === "/conns") {
       const instance = url.searchParams.get("instance") || "default";
