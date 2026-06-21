@@ -103,21 +103,31 @@ async function loadCurrent() {
   const status = document.getElementById("status");
   editor.value = "Cargando...";
   status.textContent = "";
-  try {
-    const resp = await fetch("/admin/api/prompts");
-    if (!resp.ok) throw new Error("HTTP " + resp.status);
-    const data = await resp.json();
-    promptsCache = {};
-    (data.prompts || []).forEach(p => { promptsCache[p.fragment] = p.content; });
-    editor.value = promptsCache[currentFragment] || "";
-    originalContent = editor.value;
-    document.getElementById("fragment-label").textContent = descriptions[currentFragment];
-    status.textContent = editor.value ? "✓ Cargado" : "";
-    status.className = "status";
-  } catch (err) {
-    editor.value = "";
-    status.textContent = "Error al cargar: " + err.message;
-    status.className = "status";
+  // Retry up to 3 times — DO may be cold (hibernating)
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      const resp = await fetch("/admin/api/prompts");
+      if (!resp.ok) throw new Error("HTTP " + resp.status);
+      const data = await resp.json();
+      if (!data.prompts || data.prompts.length === 0) throw new Error("Empty response");
+      promptsCache = {};
+      data.prompts.forEach((p: any) => { promptsCache[p.fragment] = p.content; });
+      editor.value = promptsCache[currentFragment] || "";
+      originalContent = editor.value;
+      document.getElementById("fragment-label")!.textContent = descriptions[currentFragment];
+      status.textContent = editor.value ? "✓ Cargado" : "";
+      status.className = "status";
+      return;
+    } catch (err: any) {
+      if (attempt < 2) {
+        status.textContent = "Reintentando (" + (attempt + 2) + "/3)...";
+        await new Promise(r => setTimeout(r, 2000));
+        continue;
+      }
+      editor.value = "";
+      status.textContent = "Error al cargar: " + err.message;
+      status.className = "status";
+    }
   }
 }
 
