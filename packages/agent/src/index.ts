@@ -30,8 +30,17 @@ const DEEPSEEK_MODEL = "deepseek/deepseek-chat";
 export class Tp3ChatAgent extends Think<Env> {
   workspaceBash = false;
 
-  /** Only expose our custom API tools — block workspace, MCP, browser */
-  beforeTurn(_ctx: any) {
+  /** Only expose our custom tools + record user messages for dashboard */
+  async beforeTurn(ctx: any) {
+    // Record the user message for dashboard analytics
+    const userMsg = ctx?.messages?.at(-1);
+    if (userMsg?.role === "user" && userMsg.content) {
+      const cid = await this.ctx.storage.get("conv_id") as string | null;
+      if (cid) {
+        this.sql`INSERT INTO messages (conversation_id, role, content) VALUES (${cid}, 'user', ${typeof userMsg.content === "string" ? userMsg.content : JSON.stringify(userMsg.content)})`;
+        this.sql`UPDATE conversations SET updated_at = datetime('now'), message_count = message_count + 1, last_message = ${(typeof userMsg.content === "string" ? userMsg.content : "").slice(0, 200)} WHERE id = ${cid}`;
+      }
+    }
     return { activeTools: ["get_collections", "query_collection"] };
   }
 
@@ -84,7 +93,38 @@ export class Tp3ChatAgent extends Think<Env> {
   }
 
   async onConnect(connection: any, ctx: any) {
+    // Ensure analytics tables exist and create a conversation row
+    const clientId = this.env.CLIENT_ID || "tp3studio";
+    this.sql`CREATE TABLE IF NOT EXISTS daily_metrics (date TEXT NOT NULL, client_id TEXT NOT NULL, messages INTEGER DEFAULT 0, tool_calls INTEGER DEFAULT 0, tool_errors INTEGER DEFAULT 0, PRIMARY KEY (date, client_id))`;
+    this.sql`CREATE TABLE IF NOT EXISTS conversations (id TEXT PRIMARY KEY, client_id TEXT NOT NULL, created_at TEXT DEFAULT (datetime('now')), updated_at TEXT DEFAULT (datetime('now')), message_count INTEGER DEFAULT 0, last_message TEXT)`;
+    this.sql`CREATE TABLE IF NOT EXISTS messages (id INTEGER PRIMARY KEY AUTOINCREMENT, conversation_id TEXT NOT NULL REFERENCES conversations(id), role TEXT NOT NULL CHECK(role IN ('user','assistant','tool')), content TEXT NOT NULL, created_at TEXT DEFAULT (datetime('now')))`;
+    this.sql`CREATE TABLE IF NOT EXISTS tool_calls_log (id INTEGER PRIMARY KEY AUTOINCREMENT, conversation_id TEXT NOT NULL, name TEXT NOT NULL, args TEXT, success INTEGER NOT NULL DEFAULT 1, error_message TEXT, duration_ms INTEGER, created_at TEXT DEFAULT (datetime('now')))`;
+    const cid = crypto.randomUUID();
+    this.sql`INSERT INTO conversations (id, client_id) VALUES (${cid}, ${clientId})`;
+    await this.ctx.storage.put("conv_id", cid);
     return super.onConnect?.(connection, ctx);
+  }
+
+  /** Record tool calls for dashboard analytics */
+  async afterToolCall(ctx: any) {
+    const cid = await this.ctx.storage.get("conv_id") as string | null;
+    if (!cid) return;
+    const today = new Date().toISOString().slice(0, 10);
+    const clientId = this.env.CLIENT_ID || "tp3studio";
+    const isError = !ctx.success;
+    this.sql`INSERT INTO tool_calls_log (conversation_id, name, args, success, error_message, duration_ms) VALUES (${cid}, ${ctx.toolName}, ${JSON.stringify(ctx.input || {})}, ${isError ? 0 : 1}, ${isError && ctx.error ? String(ctx.error).slice(0, 200) : null}, ${ctx.durationMs || 0})`;
+    this.sql`INSERT INTO daily_metrics (date, client_id, messages, tool_calls, tool_errors) VALUES (${today}, ${clientId}, 0, 1, ${isError ? 1 : 0}) ON CONFLICT (date, client_id) DO UPDATE SET tool_calls = tool_calls + 1, tool_errors = tool_errors + ${isError ? 1 : 0}`;
+  }
+
+  /** Record assistant messages and update conversation for dashboard */
+  async onStepFinish(ctx: any) {
+    const cid = await this.ctx.storage.get("conv_id") as string | null;
+    if (!cid || !ctx.text) return;
+    const today = new Date().toISOString().slice(0, 10);
+    const clientId = this.env.CLIENT_ID || "tp3studio";
+    this.sql`INSERT INTO messages (conversation_id, role, content) VALUES (${cid}, 'assistant', ${ctx.text})`;
+    this.sql`UPDATE conversations SET updated_at = datetime('now'), message_count = message_count + 1, last_message = ${ctx.text.slice(0, 200)} WHERE id = ${cid}`;
+    this.sql`INSERT INTO daily_metrics (date, client_id, messages, tool_calls, tool_errors) VALUES (${today}, ${clientId}, 1, 0, 0) ON CONFLICT (date, client_id) DO UPDATE SET messages = messages + 1`;
   }
 
   // ─── Dashboard admin RPC methods ───
