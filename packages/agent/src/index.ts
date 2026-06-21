@@ -30,6 +30,19 @@ const DEEPSEEK_MODEL = "deepseek/deepseek-chat";
 export class Tp3ChatAgent extends Think<Env> {
   workspaceBash = false;
 
+  /** Keep the shared "chat" DO warm so the dashboard doesn't hit cold starts. */
+  async onStart() {
+    await super.onStart?.();
+    await this.scheduleEvery(300, "keepWarm"); // every 5 minutes
+  }
+
+  async keepWarm() {
+    // Touch all SQLite queries the dashboard needs — keeps DO from hibernating
+    this.sql`SELECT COUNT(*) FROM runtime_prompts` as any[];
+    this.sql`SELECT COUNT(*) FROM assistant_sessions` as any[];
+    this.sql`SELECT COUNT(*) FROM assistant_messages` as any[];
+  }
+
   /** Only expose our custom API tools — block workspace, MCP, browser */
   beforeTurn(_ctx: any) {
     return { activeTools: ["get_collections", "query_collection"] };
