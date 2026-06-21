@@ -71,11 +71,29 @@ export default function ChatWidget({
   const messagesEnd = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
-  // Single instance "chat" — dashboard sees all analytics in one place.
-  // Think isolates user sessions internally via its Session system.
+  // Session ID with 30-minute expiration. Survives reloads but resets
+  // after inactivity — reasonable for customer service scenarios.
+  const [sessionId] = useState(() => {
+    if (typeof window === "undefined") return "ssr";
+    const key = `chat-session-${agentName}`;
+    const tsKey = `${key}-ts`;
+    const stored = localStorage.getItem(key);
+    const storedTs = localStorage.getItem(tsKey);
+    const now = Date.now();
+    const TTL = 30 * 60 * 1000; // 30 minutes
+    if (stored && storedTs && now - parseInt(storedTs, 10) < TTL) {
+      localStorage.setItem(tsKey, String(now)); // bump timestamp
+      return stored;
+    }
+    const id = crypto.randomUUID();
+    localStorage.setItem(key, id);
+    localStorage.setItem(tsKey, String(now));
+    return id;
+  });
+
   const agent = useAgent({
     agent: agentName,
-    name: "chat",
+    name: sessionId,
     host: agentHost,
   });
 

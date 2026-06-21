@@ -30,17 +30,8 @@ const DEEPSEEK_MODEL = "deepseek/deepseek-chat";
 export class Tp3ChatAgent extends Think<Env> {
   workspaceBash = false;
 
-  /** Only expose our custom tools + record user messages for dashboard */
-  async beforeTurn(ctx: any) {
-    // Record the user message for dashboard analytics
-    const userMsg = ctx?.messages?.at(-1);
-    if (userMsg?.role === "user" && userMsg.content) {
-      const cid = await this.ctx.storage.get("conv_id") as string | null;
-      if (cid) {
-        this.sql`INSERT INTO messages (conversation_id, role, content) VALUES (${cid}, 'user', ${typeof userMsg.content === "string" ? userMsg.content : JSON.stringify(userMsg.content)})`;
-        this.sql`UPDATE conversations SET updated_at = datetime('now'), message_count = message_count + 1, last_message = ${(typeof userMsg.content === "string" ? userMsg.content : "").slice(0, 200)} WHERE id = ${cid}`;
-      }
-    }
+  /** Only expose our custom API tools — block workspace, MCP, browser */
+  beforeTurn(_ctx: any) {
     return { activeTools: ["get_collections", "query_collection"] };
   }
 
@@ -93,46 +84,43 @@ export class Tp3ChatAgent extends Think<Env> {
   }
 
   async onConnect(connection: any, ctx: any) {
-    // Ensure analytics tables exist and create a conversation row
-    const clientId = this.env.CLIENT_ID || "tp3studio";
-    this.sql`CREATE TABLE IF NOT EXISTS daily_metrics (date TEXT NOT NULL, client_id TEXT NOT NULL, messages INTEGER DEFAULT 0, tool_calls INTEGER DEFAULT 0, tool_errors INTEGER DEFAULT 0, PRIMARY KEY (date, client_id))`;
-    this.sql`CREATE TABLE IF NOT EXISTS conversations (id TEXT PRIMARY KEY, client_id TEXT NOT NULL, created_at TEXT DEFAULT (datetime('now')), updated_at TEXT DEFAULT (datetime('now')), message_count INTEGER DEFAULT 0, last_message TEXT)`;
-    this.sql`CREATE TABLE IF NOT EXISTS messages (id INTEGER PRIMARY KEY AUTOINCREMENT, conversation_id TEXT NOT NULL REFERENCES conversations(id), role TEXT NOT NULL CHECK(role IN ('user','assistant','tool')), content TEXT NOT NULL, created_at TEXT DEFAULT (datetime('now')))`;
-    this.sql`CREATE TABLE IF NOT EXISTS tool_calls_log (id INTEGER PRIMARY KEY AUTOINCREMENT, conversation_id TEXT NOT NULL, name TEXT NOT NULL, args TEXT, success INTEGER NOT NULL DEFAULT 1, error_message TEXT, duration_ms INTEGER, created_at TEXT DEFAULT (datetime('now')))`;
-    const cid = crypto.randomUUID();
-    this.sql`INSERT INTO conversations (id, client_id) VALUES (${cid}, ${clientId})`;
-    await this.ctx.storage.put("conv_id", cid);
     return super.onConnect?.(connection, ctx);
-  }
-
-  /** Record tool calls for dashboard analytics */
-  async afterToolCall(ctx: any) {
-    const cid = await this.ctx.storage.get("conv_id") as string | null;
-    if (!cid) return;
-    const today = new Date().toISOString().slice(0, 10);
-    const clientId = this.env.CLIENT_ID || "tp3studio";
-    const isError = !ctx.success;
-    this.sql`INSERT INTO tool_calls_log (conversation_id, name, args, success, error_message, duration_ms) VALUES (${cid}, ${ctx.toolName}, ${JSON.stringify(ctx.input || {})}, ${isError ? 0 : 1}, ${isError && ctx.error ? String(ctx.error).slice(0, 200) : null}, ${ctx.durationMs || 0})`;
-    this.sql`INSERT INTO daily_metrics (date, client_id, messages, tool_calls, tool_errors) VALUES (${today}, ${clientId}, 0, 1, ${isError ? 1 : 0}) ON CONFLICT (date, client_id) DO UPDATE SET tool_calls = tool_calls + 1, tool_errors = tool_errors + ${isError ? 1 : 0}`;
-  }
-
-  /** Record assistant messages and update conversation for dashboard */
-  async onStepFinish(ctx: any) {
-    const cid = await this.ctx.storage.get("conv_id") as string | null;
-    if (!cid || !ctx.text) return;
-    const today = new Date().toISOString().slice(0, 10);
-    const clientId = this.env.CLIENT_ID || "tp3studio";
-    this.sql`INSERT INTO messages (conversation_id, role, content) VALUES (${cid}, 'assistant', ${ctx.text})`;
-    this.sql`UPDATE conversations SET updated_at = datetime('now'), message_count = message_count + 1, last_message = ${ctx.text.slice(0, 200)} WHERE id = ${cid}`;
-    this.sql`INSERT INTO daily_metrics (date, client_id, messages, tool_calls, tool_errors) VALUES (${today}, ${clientId}, 1, 0, 0) ON CONFLICT (date, client_id) DO UPDATE SET messages = messages + 1`;
   }
 
   // ─── Dashboard admin RPC methods ───
 
   async adminGetConnections() { return [...this.getConnections()].length; }
-  async adminGetConversation(conversationId: string) { return { messages: this.sql`SELECT role, content, created_at FROM messages WHERE conversation_id = ${conversationId} ORDER BY created_at ASC` as any[] }; }
-  async adminGetConversations(limit: number, offset: number) { return { conversations: this.sql`SELECT id, client_id, created_at, updated_at, message_count, last_message FROM conversations ORDER BY updated_at DESC LIMIT ${limit} OFFSET ${offset}` as any[] }; }
-  async adminGetStats(clientId: string) { const t = new Date().toISOString().slice(0, 10); const row = (this.sql`SELECT messages, tool_calls, tool_errors FROM daily_metrics WHERE date = ${t} AND client_id = ${clientId}` as any[])[0]; return { today: row || { messages: 0, tool_calls: 0, tool_errors: 0 }, series: this.sql`SELECT date, messages, tool_calls, tool_errors FROM daily_metrics WHERE client_id = ${clientId} ORDER BY date DESC LIMIT 30` as any[], connections: [...this.getConnections()].length }; }
+  async adminGetConversation(sessionId: string) {
+    return {
+      messages: this.sql`SELECT role, content, created_at FROM assistant_messages WHERE session_id = ${sessionId} ORDER BY created_at ASC` as any[]
+    };
+  }
+  async adminGetConversations(limit: number, offset: number) {
+    const sessions = this.sql`SELECT id, created_at, updated_at FROM assistant_sessions ORDER BY updated_at DESC LIMIT ${limit} OFFSET ${offset}` as any[];
+    const conversations = [];
+    for (const s of sessions) {
+      const msgs = this.sql`SELECT role, content FROM assistant_messages WHERE session_id = ${s.id} ORDER BY created_at DESC` as any[];
+      conversations.push({
+        id: s.id,
+        client_id: this.env.CLIENT_ID || "tp3studio",
+        created_at: s.created_at,
+        updated_at: s.updated_at,
+        message_count: msgs.length,
+        last_message: msgs[0]?.content?.slice(0, 200) || "",
+      });
+    }
+    return { conversations };
+  }
+  async adminGetStats(_clientId: string) {
+    const t = new Date().toISOString().slice(0, 10);
+    const todayCount = (this.sql`SELECT COUNT(*) as c FROM assistant_messages WHERE date(created_at) = ${t}` as any[])[0]?.c || 0;
+    const series = this.sql`SELECT date(created_at) as date, COUNT(*) as messages FROM assistant_messages GROUP BY date(created_at) ORDER BY date DESC LIMIT 30` as any[];
+    return {
+      today: { messages: todayCount, tool_calls: 0, tool_errors: 0 },
+      series,
+      connections: [...this.getConnections()].length,
+    };
+  }
   async adminGetPrompts(clientId: string) { const rows = this.sql`SELECT fragment, content FROM runtime_prompts WHERE client_id = ${clientId}` as any[]; const defaults = DEFAULTS[clientId] ?? DEFAULTS["tp3studio"]; const fragments = ["SOUL", "SKILLS", "RULES", "CONTEXT"]; const ov: Record<string, string> = {}; for (const r of rows) { if (r.content?.trim()) ov[r.fragment] = r.content; } return { prompts: fragments.map((f) => ({ fragment: f, content: ov[f] !== undefined ? ov[f] : (defaults[f] || ""), hasOverride: ov[f] !== undefined })) }; }
   async adminSavePrompt(clientId: string, fragment: string, content: string) { if (!content?.trim()) { this.sql`DELETE FROM runtime_prompts WHERE client_id = ${clientId} AND fragment = ${fragment}`; } else { this.sql`INSERT INTO runtime_prompts (client_id, fragment, content, updated_at) VALUES (${clientId}, ${fragment}, ${content}, datetime('now')) ON CONFLICT (client_id, fragment) DO UPDATE SET content = ${content}, updated_at = datetime('now')`; } }
 
